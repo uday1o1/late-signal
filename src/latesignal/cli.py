@@ -9,10 +9,12 @@ from typing import Annotated, Any
 
 import typer
 
+from latesignal.contracts.config import load_synthetic_config
 from latesignal.data.config import load_data_config
 from latesignal.data.download import FetchNotice, fetch_dataset
 from latesignal.data.inspect import inspect_locked_archive
-from latesignal.errors import LateSignalError
+from latesignal.errors import ExitCode, LateSignalError
+from latesignal.experiments.runner import resume_synthetic_experiment, run_synthetic_experiment
 
 app = typer.Typer(
     name="latesignal",
@@ -48,6 +50,111 @@ JsonOption = Annotated[
     bool,
     typer.Option("--json", help="Emit newline-delimited machine-readable JSON."),
 ]
+
+
+@app.command("run")
+def run_experiment(
+    config: Annotated[
+        Path,
+        typer.Argument(
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+            help="Authored experiment configuration.",
+        ),
+    ],
+    out: Annotated[
+        Path,
+        typer.Option(
+            "--out",
+            file_okay=False,
+            dir_okay=True,
+            resolve_path=True,
+            help="New run output directory.",
+        ),
+    ],
+    stop_after_checkpoints: Annotated[
+        int | None,
+        typer.Option(
+            "--stop-after-checkpoints",
+            hidden=True,
+            help="Testing hook that simulates interruption after N checkpoints.",
+        ),
+    ] = None,
+    json_output: JsonOption = False,
+) -> None:
+    """Run an authored experiment through the public event-time path."""
+
+    try:
+        authored = load_synthetic_config(config)
+        manifest = run_synthetic_experiment(
+            authored,
+            out,
+            stop_after_checkpoints=stop_after_checkpoints,
+        )
+    except LateSignalError as error:
+        _fail(error, json_output)
+    _emit(
+        {
+            "ok": manifest["status"] == "complete",
+            "status": manifest["status"],
+            "out": str(out),
+            "manifest": str(out / "manifest.json"),
+            "counts": manifest["counts"],
+            "metrics": manifest["metrics"],
+            "ledger_sha256": manifest["ledger_sha256"],
+        },
+        json_output,
+    )
+    if manifest["status"] != "complete":
+        raise typer.Exit(code=int(ExitCode.INFRASTRUCTURE_FAILURE))
+
+
+@app.command("resume")
+def resume_experiment(
+    checkpoint: Annotated[
+        Path,
+        typer.Argument(
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+            help="Synthetic checkpoint to resume.",
+        ),
+    ],
+    out: Annotated[
+        Path,
+        typer.Option(
+            "--out",
+            file_okay=False,
+            dir_okay=True,
+            resolve_path=True,
+            help="New resume output directory.",
+        ),
+    ],
+    json_output: JsonOption = False,
+) -> None:
+    """Resume a synthetic run after validating its immutable identities."""
+
+    try:
+        manifest = resume_synthetic_experiment(checkpoint, out)
+    except LateSignalError as error:
+        _fail(error, json_output)
+    _emit(
+        {
+            "ok": True,
+            "status": manifest["status"],
+            "out": str(out),
+            "manifest": str(out / "manifest.json"),
+            "counts": manifest["counts"],
+            "metrics": manifest["metrics"],
+            "ledger_sha256": manifest["ledger_sha256"],
+        },
+        json_output,
+    )
 
 
 def _emit(value: dict[str, Any], json_output: bool) -> None:

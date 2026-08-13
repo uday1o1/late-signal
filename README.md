@@ -4,7 +4,7 @@ LateSignal is a leakage-audited event-time benchmark for learning conversion pro
 It also evaluates when a fixed compute budget should be spent using calibration evidence from legally mature cohorts.
 
 The repository is under active implementation against [BUILD_PLAN.md](BUILD_PLAN.md).
-The current implemented surface covers the licensing and data-audit foundation.
+The current implemented surface covers the licensing and data-audit foundation plus the synthetic event-time vertical slice.
 No Criteo data or measured model result is included.
 
 ## Development setup
@@ -34,3 +34,18 @@ The command prints the observed SHA-256 and an exact second command for explicit
 Preparation and inspection refuse an untrusted artifact.
 
 Raw data and every derived row-level artifact are ignored by Git.
+
+## Synthetic vertical slice
+
+Run the complete deterministic CPU path without licensed data:
+
+```console
+uv run latesignal run configs/experiments/synthetic.yaml --out runs/synthetic
+```
+
+The run writes predictions before same-time reveals, drains final truth after the last click, and records metrics, compute ledgers, checkpoints, and a reproducibility manifest.
+Resume an interrupted run into a new directory with:
+
+```console
+uv run latesignal resume runs/synthetic/checkpoints/CHECKPOINT.json --out runs/resumed
+```
