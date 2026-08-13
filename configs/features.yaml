@@ -1,0 +1,15 @@
+version: 1
+field_seed: 20260813
+policy: compact
+high_cardinality_fields:
+  - audience_id
+  - product_brand
+  - product_id
+  - product_title
+  - partner_id
+  - user_id
+high_cardinality_buckets: 262144
+other_categorical_buckets: 4096
+burn_in_last_day: 14
+numeric_lower_quantile: 0.01
+numeric_upper_quantile: 0.99

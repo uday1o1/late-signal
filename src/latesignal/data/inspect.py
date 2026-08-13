@@ -95,7 +95,7 @@ def _update_lexical_stats(
                 stats[field]["negative"] += 1
 
 
-def _parse_row(
+def parse_raw_row(
     values: list[str], schema: RawSchema
 ) -> tuple[ParsedRow | None, list[str], list[str]]:
     if len(values) != len(schema.fields):
@@ -195,7 +195,7 @@ def _iter_member_lines(archive_path: Path, member_name: str) -> tuple[tarfile.Ta
         ) from error
 
 
-def _rows(
+def iter_raw_rows(
     archive_path: Path,
     member_name: str,
     schema: RawSchema,
@@ -326,7 +326,7 @@ def inspect_archive(
         connection.execute("PRAGMA synchronous=OFF")
         connection.execute("CREATE TABLE rows (fingerprint BLOB PRIMARY KEY)")
         with os.fdopen(descriptor, "w", encoding="utf-8") as quarantine_output:
-            for raw_index, raw_line, values in _rows(
+            for raw_index, raw_line, values in iter_raw_rows(
                 archive_path,
                 config.dataset.data_member,
                 config.schema,
@@ -342,7 +342,7 @@ def inspect_archive(
                     state.duplicate_rows += 1
                 if len(values) == len(config.schema.fields):
                     _update_lexical_stats(values, config.schema, stats)
-                parsed, reasons, fields = _parse_row(values, config.schema)
+                parsed, reasons, fields = parse_raw_row(values, config.schema)
                 if parsed is None:
                     state.quarantined_rows += 1
                     for reason in reasons:
@@ -410,8 +410,8 @@ def inspect_archive(
         last_positive_reveal_seconds: float | None = None
         last_negative_maturity_seconds: float | None = None
         accepted_second_pass = 0
-        for _, _, values in _rows(archive_path, config.dataset.data_member, config.schema):
-            parsed, _, _ = _parse_row(values, config.schema)
+        for _, _, values in iter_raw_rows(archive_path, config.dataset.data_member, config.schema):
+            parsed, _, _ = parse_raw_row(values, config.schema)
             if parsed is None:
                 continue
             accepted_second_pass += 1

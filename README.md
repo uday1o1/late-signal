@@ -35,6 +35,15 @@ Preparation and inspection refuse an untrusted artifact.
 
 Raw data and every derived row-level artifact are ignored by Git.
 
+After a reviewed archive has an immutable inspection manifest, prepare it with:
+
+```console
+uv run latesignal data prepare
+```
+
+Preparation uses bounded Polars batches and explicit Arrow schemas to publish physically separate click-day feature partitions and reveal-day or maturity-day truth partitions.
+The command refuses to overwrite an existing prepared store.
+
 ## Synthetic vertical slice
 
 Run the complete deterministic CPU path without licensed data:

@@ -11,8 +11,12 @@ requires-python = ">=3.12,<3.13"
 license = "MIT"
 authors = [{ name = "LateSignal contributors" }]
 dependencies = [
+  "blake3>=1.0,<2",
+  "polars>=1.32.3,<2",
+  "pyarrow>=19,<23",
   "PyYAML>=6.0.2,<7",
   "typer>=0.21.1,<0.22",
+  "xxhash>=3.5,<4",
 ]
 
 [project.scripts]

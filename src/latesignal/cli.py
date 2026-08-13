@@ -13,8 +13,10 @@ from latesignal.contracts.config import load_synthetic_config
 from latesignal.data.config import load_data_config
 from latesignal.data.download import FetchNotice, fetch_dataset
 from latesignal.data.inspect import inspect_locked_archive
+from latesignal.data.prepare import prepare_data
 from latesignal.errors import ExitCode, LateSignalError
 from latesignal.experiments.runner import resume_synthetic_experiment, run_synthetic_experiment
+from latesignal.features.policy import load_feature_policy
 
 app = typer.Typer(
     name="latesignal",
@@ -269,6 +271,78 @@ def data_inspect(
             "quarantine": str(quarantine),
             "rows": manifest["rows"],
             "time_unit": manifest["time_unit"],
+        },
+        json_output,
+    )
+
+
+@data_app.command("prepare")
+def data_prepare(
+    config: ConfigOption = Path("configs/data.yaml"),
+    features: Annotated[
+        Path,
+        typer.Option(
+            "--features",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+            help="Authored feature policy.",
+        ),
+    ] = Path("configs/features.yaml"),
+    data_root: DataRootOption = Path("data/raw"),
+    inspection: Annotated[
+        Path,
+        typer.Option(
+            "--inspection",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+            help="Immutable inspection manifest.",
+        ),
+    ] = Path("data/processed/manifests/inspection.json"),
+    out: Annotated[
+        Path,
+        typer.Option(
+            "--out",
+            file_okay=False,
+            dir_okay=True,
+            resolve_path=True,
+            help="Processed data root.",
+        ),
+    ] = Path("data/processed"),
+    batch_rows: Annotated[
+        int,
+        typer.Option("--batch-rows", min=1, help="Maximum accepted rows per Polars batch."),
+    ] = 65_536,
+    json_output: JsonOption = False,
+) -> None:
+    """Prepare reviewed rows into isolated feature and truth Parquet stores."""
+
+    try:
+        authored = load_data_config(config)
+        policy = load_feature_policy(features)
+        manifest = prepare_data(
+            authored,
+            policy,
+            data_root=data_root,
+            inspection_path=inspection,
+            output_root=out,
+            batch_rows=batch_rows,
+        )
+    except LateSignalError as error:
+        _fail(error, json_output)
+    _emit(
+        {
+            "ok": True,
+            "status": "prepared",
+            "out": str(out),
+            "manifest": str(out / "manifests" / "preparation.json"),
+            "rows": manifest["rows"],
+            "streaming": manifest["streaming"],
         },
         json_output,
     )
