@@ -8,14 +8,17 @@ from pathlib import Path
 from typing import Annotated, Any
 
 import typer
+import yaml
 
 from latesignal.contracts.config import load_synthetic_config
+from latesignal.contracts.study_a import load_study_a_config
 from latesignal.data.config import load_data_config
 from latesignal.data.download import FetchNotice, fetch_dataset
 from latesignal.data.inspect import inspect_locked_archive
 from latesignal.data.prepare import prepare_data
 from latesignal.errors import ExitCode, LateSignalError
 from latesignal.experiments.runner import resume_synthetic_experiment, run_synthetic_experiment
+from latesignal.experiments.study_a import run_study_a
 from latesignal.features.policy import load_feature_policy
 
 app = typer.Typer(
@@ -90,12 +93,23 @@ def run_experiment(
     """Run an authored experiment through the public event-time path."""
 
     try:
-        authored = load_synthetic_config(config)
-        manifest = run_synthetic_experiment(
-            authored,
-            out,
-            stop_after_checkpoints=stop_after_checkpoints,
-        )
+        raw = yaml.safe_load(config.read_text(encoding="utf-8"))
+        mode = raw.get("mode") if isinstance(raw, dict) else None
+        if mode == "synthetic":
+            authored = load_synthetic_config(config)
+            manifest = run_synthetic_experiment(
+                authored,
+                out,
+                stop_after_checkpoints=stop_after_checkpoints,
+            )
+        elif mode == "synthetic-study-a":
+            if stop_after_checkpoints is not None:
+                raise typer.BadParameter(
+                    "--stop-after-checkpoints is available only for the synthetic vertical slice"
+                )
+            manifest = run_study_a(load_study_a_config(config), out)
+        else:
+            raise typer.BadParameter(f"Unsupported experiment mode: {mode!r}")
     except LateSignalError as error:
         _fail(error, json_output)
     _emit(
@@ -104,9 +118,9 @@ def run_experiment(
             "status": manifest["status"],
             "out": str(out),
             "manifest": str(out / "manifest.json"),
-            "counts": manifest["counts"],
-            "metrics": manifest["metrics"],
-            "ledger_sha256": manifest["ledger_sha256"],
+            "counts": manifest.get("counts", {"methods": manifest.get("method_count", 0)}),
+            "metrics": manifest.get("metrics"),
+            "ledger_sha256": manifest.get("ledger_sha256"),
         },
         json_output,
     )

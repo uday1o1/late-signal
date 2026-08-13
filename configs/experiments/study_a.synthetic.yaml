@@ -1,0 +1,16 @@
+version: 1
+mode: synthetic-study-a
+seed: 17
+attribution_seconds: 2592000
+wait_seconds: 86400
+credits: 3
+initialization_steps: 4
+steps_per_credit: 2
+batch_size: 8
+recent_window_seconds: 604800
+reservoir_capacity: 1000
+learning_rate: 0.001
+weight_decay: 0.0001
+gradient_norm_clip: 5.0
+auxiliary_initialization_steps: 2
+auxiliary_later_steps: 1

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 
 import pytest
 import torch
 
 from latesignal.contracts.events import ClickEvent, NegativeMaturity, PositiveReveal, TruthRecord
+from latesignal.methods.base import DelayedMethod
 from latesignal.methods.complete_wait import CompleteWaitMethod
 from latesignal.methods.dfm import DelayedFeedbackMethod
 from latesignal.methods.es_dfm import ESDFMMethod
@@ -152,3 +154,29 @@ def test_method_state_round_trips_and_oracle_is_excluded_from_ranking() -> None:
     assert records[0].available_at == 0
     assert oracle.deployable is False
     assert oracle.ranking_eligible is False
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [
+        lambda: CompleteWaitMethod(attribution_seconds=30),
+        ImmediateFakeNegativeMethod,
+        lambda: FixedWaitMethod(wait_seconds=10),
+        lambda: DelayedFeedbackMethod(attribution_seconds=30),
+        FakeNegativeWeightedMethod,
+        lambda: ESDFMMethod(wait_seconds=10, attribution_seconds=30),
+        lambda: OracleReferenceMethod((TruthRecord("click", 1, 20),)),
+    ],
+)
+def test_every_method_state_survives_round_trip(factory: Callable[[], DelayedMethod]) -> None:
+    original = factory()
+    original.on_click(ClickEvent("click", 0, 2.0))
+    original.on_positive_reveal(PositiveReveal("click", 20))
+    original.on_boundary(30)
+    restored = factory()
+
+    restored.load_state_dict(original.state_dict())
+
+    assert restored.state_dict() == original.state_dict()
+    if not isinstance(restored, OracleReferenceMethod):
+        assert "_truth" not in vars(restored)

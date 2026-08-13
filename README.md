@@ -4,7 +4,7 @@ LateSignal is a leakage-audited event-time benchmark for learning conversion pro
 It also evaluates when a fixed compute budget should be spent using calibration evidence from legally mature cohorts.
 
 The repository is under active implementation against [BUILD_PLAN.md](BUILD_PLAN.md).
-The current implemented surface covers the licensing and data-audit foundation plus the synthetic event-time vertical slice.
+The current implemented surface covers the licensing and data-audit foundation, data preparation, synthetic event-time vertical slice, shared conversion model, offline sanity references, and synthetic Study A qualification.
 No Criteo data or measured model result is included.
 
 ## Development setup
@@ -58,3 +58,15 @@ Resume an interrupted run into a new directory with:
 ```console
 uv run latesignal resume runs/synthetic/checkpoints/CHECKPOINT.json --out runs/resumed
 ```
+
+## Synthetic Study A qualification
+
+Run every delayed-label method through one shared initialization checkpoint, fixed schedule, and exactly reconciled core budget without licensed data:
+
+```console
+uv run latesignal run configs/experiments/study_a.synthetic.yaml --out runs/study-a
+```
+
+This bounded path qualifies complete wait, immediate fake negative, fixed wait, DFM, FNW, the ES-DFM constant-wait transfer, and the separate unattainable oracle.
+It reports method-specific auxiliary compute separately and does not claim to reproduce any published result.
+See [docs/delayed-methods.md](docs/delayed-methods.md) for equations, citations, and transfer boundaries.

@@ -52,6 +52,11 @@ class ConversionMLP(nn.Module):
         self.output = nn.Linear(64, 1)
 
     def forward(self, categorical: dict[str, Tensor], numeric: Tensor) -> Tensor:
+        return cast(Tensor, self.output(self.representation(categorical, numeric)).squeeze(1))
+
+    def representation(self, categorical: dict[str, Tensor], numeric: Tensor) -> Tensor:
+        """Return the shared 64-wide representation before the conversion head."""
+
         if tuple(sorted(categorical)) != self.categorical_fields:
             raise ValueError("Categorical batch does not match the model field contract")
         if numeric.ndim != 2 or numeric.shape[1] != 4:
@@ -64,7 +69,7 @@ class ConversionMLP(nn.Module):
                 raise ValueError(f"Categorical field {field} has an invalid shape")
             embedded.append(self.embeddings[field](values))
         combined = torch.cat([*embedded, numeric], dim=1)
-        return cast(Tensor, self.output(self.backbone(combined)).squeeze(1))
+        return cast(Tensor, self.backbone(combined))
 
     @property
     def parameter_count(self) -> int:

@@ -38,6 +38,15 @@ class ModelBatch:
 BatchEncoder = Callable[[tuple[TrainingRecord, ...]], ModelBatch]
 
 
+@dataclass(frozen=True, slots=True)
+class TrainingLoss:
+    loss: Tensor
+    exposure_weights: Tensor
+
+
+LossFunction = Callable[[Tensor, ModelBatch], TrainingLoss]
+
+
 class MLPTrainer:
     """Shared AdamW trainer with exact budget and exposure accounting."""
 
@@ -51,6 +60,7 @@ class MLPTrainer:
         steps_per_credit: int,
         batch_size: int,
         encoder: BatchEncoder,
+        loss_function: LossFunction | None = None,
         device: str | torch.device = "cpu",
     ) -> None:
         if learning_rate <= 0.0 or weight_decay < 0.0 or gradient_norm_clip <= 0.0:
@@ -68,6 +78,7 @@ class MLPTrainer:
         self.steps_per_credit = steps_per_credit
         self.batch_size = batch_size
         self.encoder = encoder
+        self.loss_function = loss_function
         self.budget = BudgetCounter()
         self.exposures: list[ExposureRecord] = []
 
@@ -91,17 +102,29 @@ class MLPTrainer:
             ):
                 raise ConsistencyError("Batch encoder returned invalid target or weight shapes")
             logits = self.model(batch.categorical, batch.numeric)
-            losses = nn.functional.binary_cross_entropy_with_logits(
-                logits,
-                batch.targets,
-                reduction="none",
-            )
-            weight_sum = batch.weights.sum()
-            if not bool(torch.isfinite(weight_sum)) or float(weight_sum.item()) <= 0.0:
-                raise ConsistencyError("Training batch has no finite positive total weight")
-            loss = (losses * batch.weights).sum() / weight_sum
+            if self.loss_function is None:
+                losses = nn.functional.binary_cross_entropy_with_logits(
+                    logits,
+                    batch.targets,
+                    reduction="none",
+                )
+                weight_sum = batch.weights.sum()
+                if not bool(torch.isfinite(weight_sum)) or float(weight_sum.item()) <= 0.0:
+                    raise ConsistencyError("Training batch has no finite positive total weight")
+                result = TrainingLoss(
+                    loss=(losses * batch.weights).sum() / weight_sum,
+                    exposure_weights=batch.weights,
+                )
+            else:
+                result = self.loss_function(logits, batch)
+            if result.loss.ndim != 0 or not bool(torch.isfinite(result.loss)):
+                raise ConsistencyError("Training loss must be a finite scalar")
+            if result.exposure_weights.shape != batch.targets.shape or not bool(
+                torch.isfinite(result.exposure_weights).all()
+            ):
+                raise ConsistencyError("Training exposure weights are invalid")
             self.optimizer.zero_grad(set_to_none=True)
-            loss.backward()  # type: ignore[no-untyped-call]
+            result.loss.backward()  # type: ignore[no-untyped-call]
             nn.utils.clip_grad_norm_(self.model.parameters(), self.gradient_norm_clip)
             self.optimizer.step()
             self.exposures.extend(
@@ -109,9 +132,9 @@ class MLPTrainer:
                     credit_id=credit_id,
                     step=step,
                     record_id=record.record_id,
-                    weight=record.weight,
+                    weight=float(result.exposure_weights[index].detach().cpu().item()),
                 )
-                for record in records
+                for index, record in enumerate(records)
             )
         self.budget.record_credit(steps=self.steps_per_credit, batch_size=self.batch_size)
         self.budget.assert_exposures(len(self.exposures))

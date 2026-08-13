@@ -23,9 +23,10 @@ Mature negatives remain censored at the 30-day attribution boundary because the 
 
 ## Fake Negative Weighted transfer
 
-FNW uses the immediate fake-negative duplicate stream and recomputes detached pre-update conversion probabilities on every exposure.
+FNW follows Sofia Ira Ktena et al., [Addressing Delayed Feedback for Continuous Training with Neural Networks in CTR prediction](https://arxiv.org/abs/1907.06558), RecSys 2019.
+It uses the immediate fake-negative duplicate stream and recomputes detached pre-update conversion probabilities on every exposure.
 Its positive weight is `1 + p` and its negative weight is `1 - p^2`.
-The implementation follows the formulation evaluated in [A Feedback Shift Correction in Predicting Conversion Rates under Delayed Feedback](https://arxiv.org/abs/2002.02068) and the behavioral reference named by the ES-DFM authors.
+The same formulation is also evaluated in [A Feedback Shift Correction in Predicting Conversion Rates under Delayed Feedback](https://arxiv.org/abs/2002.02068) and implemented by the behavioral reference named by the ES-DFM authors.
 
 ## ES-DFM constant-wait transfer
 
