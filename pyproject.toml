@@ -12,9 +12,13 @@ license = "MIT"
 authors = [{ name = "LateSignal contributors" }]
 dependencies = [
   "blake3>=1.0,<2",
+  "lightgbm>=4.6,<5",
+  "numpy>=2,<3",
   "polars>=1.32.3,<2",
   "pyarrow>=19,<23",
   "PyYAML>=6.0.2,<7",
+  "scikit-learn>=1.7,<2",
+  "torch>=2.11,<2.12",
   "typer>=0.21.1,<0.22",
   "xxhash>=3.5,<4",
 ]
