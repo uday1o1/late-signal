@@ -1,0 +1,3 @@
+version: 1
+scheduler: fixed_deadline
+window_days: 5

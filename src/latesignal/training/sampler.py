@@ -26,12 +26,20 @@ def _tuple_tree(value: Any) -> Any:
 class DeterministicSampler:
     """Sample half recent and half from a deterministic uniform-priority reservoir."""
 
-    def __init__(self, *, seed: int, recent_window_seconds: int, reservoir_capacity: int) -> None:
+    def __init__(
+        self,
+        *,
+        seed: int,
+        recent_window_seconds: int,
+        reservoir_capacity: int,
+        excluded_click_ids: frozenset[str] = frozenset(),
+    ) -> None:
         if recent_window_seconds <= 0 or reservoir_capacity <= 0:
             raise ValueError("Sampler window and reservoir capacity must be positive")
         self.seed = seed
         self.recent_window_seconds = recent_window_seconds
         self.reservoir_capacity = reservoir_capacity
+        self.excluded_click_ids = excluded_click_ids
         self._records: list[TrainingRecord] = []
         self._ids: set[str] = set()
         self._rng = random.Random(seed)
@@ -39,6 +47,8 @@ class DeterministicSampler:
 
     def add(self, record: TrainingRecord, simulator_time: int) -> None:
         record.assert_available(simulator_time)
+        if record.click_id in self.excluded_click_ids:
+            raise ConsistencyError(f"Monitoring record cannot enter training: {record.click_id}")
         self._advance(simulator_time)
         if record.record_id in self._ids:
             raise ConsistencyError(f"Sampler record added twice: {record.record_id}")
@@ -95,6 +105,7 @@ class DeterministicSampler:
             "seed": self.seed,
             "recent_window_seconds": self.recent_window_seconds,
             "reservoir_capacity": self.reservoir_capacity,
+            "excluded_click_ids": sorted(self.excluded_click_ids),
             "records": [record.as_dict() for record in self._records],
             "rng_state": self._rng.getstate(),
             "last_time": self._last_time,
@@ -105,6 +116,7 @@ class DeterministicSampler:
             state.get("seed") != self.seed
             or state.get("recent_window_seconds") != self.recent_window_seconds
             or state.get("reservoir_capacity") != self.reservoir_capacity
+            or state.get("excluded_click_ids") != sorted(self.excluded_click_ids)
         ):
             raise ConsistencyError("Sampler checkpoint does not match configuration")
         records = state.get("records")

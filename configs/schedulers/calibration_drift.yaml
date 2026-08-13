@@ -1,0 +1,11 @@
+version: 1
+scheduler: calibration_drift
+window_days: 5
+threshold: 3.0
+monitor_seed: 20260813
+monitoring_fraction: 0.1
+monitoring_window_days: 7
+probability_bins: 10
+minimum_bin_examples: 1000
+minimum_bin_variance: 25.0
+epsilon: 0.00000001

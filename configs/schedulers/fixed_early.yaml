@@ -1,0 +1,3 @@
+version: 1
+scheduler: fixed_early
+window_days: 5

@@ -1,0 +1,13 @@
+version: 1
+mode: synthetic-study-b
+seed: 17
+window_days: 5
+steps_per_credit: 2
+batch_size: 8
+recent_window_seconds: 604800
+reservoir_capacity: 1000
+learning_rate: 0.05
+monitor_seed: 20260813
+monitoring_examples_per_day: 1000
+shift_click_day: 3
+threshold: 3.0

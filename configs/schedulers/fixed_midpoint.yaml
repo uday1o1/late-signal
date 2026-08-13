@@ -1,0 +1,3 @@
+version: 1
+scheduler: fixed_midpoint
+window_days: 5
