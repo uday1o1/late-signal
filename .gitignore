@@ -1,0 +1,19 @@
+.DS_Store
+.coverage
+.hypothesis/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.venv/
+__pycache__/
+*.egg-info/
+*.py[cod]
+
+# Licensed or generated data and run artifacts.
+/data/
+/runs/
+/checkpoints/
+/artifacts/
+/reports/
+/results/published/*.html
+/results/published/*.png

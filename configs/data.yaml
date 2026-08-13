@@ -1,0 +1,49 @@
+version: 1
+dataset:
+  name: Criteo Sponsored Search Conversion Log
+  license_id: CC-BY-NC-SA-4.0
+  official_page: https://ailab.criteo.com/criteo-sponsored-search-conversion-log-dataset/
+  archive_url: https://criteostorage.blob.core.windows.net/criteo-research-datasets/Criteo_Conversion_Search.tar.gz
+  archive_filename: Criteo_Conversion_Search.tar.gz
+  expected_bytes: 2002864638
+  expected_sha256: null
+  expected_members:
+    - Criteo_Conversion_Search
+    - Criteo_Conversion_Search/Criteo_Conversion_Search.tar.gz
+    - Criteo_Conversion_Search/CriteoSearchData
+    - Criteo_Conversion_Search/._README.md
+    - Criteo_Conversion_Search/README.md
+  data_member: Criteo_Conversion_Search/CriteoSearchData
+  noncommercial_notice: Commercial use is not permitted by the dataset license.
+archive_limits:
+  max_members: 64
+  max_member_bytes: 10737418240
+  max_expanded_bytes: 12884901888
+  max_compression_ratio: 100.0
+schema:
+  delimiter: "\t"
+  has_header: false
+  fields:
+    - Sale
+    - SalesAmountInEuro
+    - time_delay_for_conversion
+    - click_timestamp
+    - nb_clicks_1week
+    - product_price
+    - product_age_group
+    - device_type
+    - audience_id
+    - product_gender
+    - product_brand
+    - product_category1
+    - product_category2
+    - product_category3
+    - product_category4
+    - product_category5
+    - product_category6
+    - product_category7
+    - product_country
+    - product_id
+    - product_title
+    - partner_id
+    - user_id
