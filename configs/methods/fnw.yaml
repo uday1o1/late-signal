@@ -1,0 +1,5 @@
+version: 1
+method: fnw
+probability_clip:
+  - 0.000001
+  - 0.999999

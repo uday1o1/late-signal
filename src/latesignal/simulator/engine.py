@@ -14,7 +14,7 @@ from latesignal.contracts.records import CreditRecord, ExposureRecord, Predictio
 from latesignal.data.manifests import write_json_atomic
 from latesignal.errors import ConsistencyError
 from latesignal.experiments.synthetic import SyntheticFixture
-from latesignal.methods.complete_wait import CompleteWaitMethod
+from latesignal.methods.mature_outcome import MatureOutcomeMethod
 from latesignal.models.tiny import TinyLogisticModel
 from latesignal.scheduling.fixed import FixedDailyScheduler
 from latesignal.simulator.ledger import AvailabilityLedger, PredictionLedger
@@ -63,7 +63,7 @@ class EventTimeEngine:
         self.fixture = fixture
         self.live_prediction_path = live_prediction_path
         self.model = TinyLogisticModel()
-        self.method = CompleteWaitMethod()
+        self.method = MatureOutcomeMethod()
         self.oracle = LabelOracle(fixture.truth)
         self.predictions = PredictionLedger()
         self.availability = AvailabilityLedger()
@@ -153,6 +153,9 @@ class EventTimeEngine:
             self._event(boundary, kind, reveal.click_id)
             for record in records:
                 self.availability.append(record, boundary)
+
+        for record in self.method.on_boundary(boundary):
+            self.availability.append(record, boundary)
 
         is_decision = (
             self.scheduler.is_decision_boundary(boundary) and boundary <= self.last_click_time

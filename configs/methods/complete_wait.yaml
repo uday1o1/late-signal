@@ -1,0 +1,3 @@
+version: 1
+method: complete_wait
+attribution_days: 30
