@@ -90,3 +90,53 @@ def test_estimator_selects_largest_quality_independent_candidate_that_fits(
     assert result["selected_steps_per_credit"] == 500
     assert result["blockers"] == []
     assert result["assumptions"]["quality_metrics_used_for_steps_choice"] is False
+
+
+def test_estimator_models_rolling_checkpoint_storage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = _write_configs(tmp_path)
+    final, protocol, protocol_sha256 = load_final_protocol(path)
+    checkpoint_bytes = 1024**3
+    benchmark = {
+        "requested_device": "cpu",
+        "measured_device": "cpu",
+        "requested_device_available": True,
+        "training_examples_per_second": 10_000_000.0,
+        "checkpoint_bytes": checkpoint_bytes,
+        "peak_host_memory_gb": 1.0,
+    }
+    monkeypatch.setattr("latesignal.experiments.estimate._benchmark", lambda _: benchmark)
+    monkeypatch.setattr(
+        "latesignal.experiments.estimate._real_pilot",
+        lambda *_: {"status": "unavailable"},
+    )
+
+    result = estimate_protocol(
+        final,
+        protocol,
+        config_path=path,
+        protocol_sha256=protocol_sha256,
+    )
+
+    projection = result["projections"][0]
+    report_gb = 89 * 250_000 / 1024**3
+    assert projection["working_disk_gb"] == pytest.approx(15.5 + 3.0 + report_gb)
+    assert projection["retained_disk_gb"] == pytest.approx(report_gb)
+    assert result["assumptions"]["checkpoint_working_copies"] == 3
+    assert result["assumptions"]["completed_checkpoints_retained"] == 0
+
+
+def test_real_data_gate_refuses_cross_batch_extrapolation(tmp_path: Path) -> None:
+    final = yaml.safe_load(Path("configs/experiments/final.yaml").read_text(encoding="utf-8"))
+    final["pilot"]["benchmark_batch_size"] = 128
+    final["protocol"] = "protocol.yaml"
+    (tmp_path / "protocol.yaml").write_text(
+        Path("configs/protocol.yaml").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    path = tmp_path / "final.yaml"
+    path.write_text(yaml.safe_dump(final, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match="locked training batch size"):
+        load_final_protocol(path)

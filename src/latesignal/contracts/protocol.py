@@ -255,6 +255,17 @@ def load_final_protocol(path: Path) -> tuple[FinalExperimentConfig, ProtocolDefi
                 )
             },
         ) from error
+    if (
+        final.require_real_pilot
+        and final.pilot.benchmark_batch_size != protocol.final_training.batch_size
+    ):
+        raise ConfigurationError(
+            "Final throughput benchmark must use the locked training batch size",
+            details={
+                "benchmark_batch_size": final.pilot.benchmark_batch_size,
+                "training_batch_size": protocol.final_training.batch_size,
+            },
+        )
     canonical = json.dumps(
         {"final": final.model_dump(mode="json"), "protocol": protocol.model_dump(mode="json")},
         sort_keys=True,

@@ -44,7 +44,13 @@ It projects every allowed steps-per-credit candidate and chooses the largest can
 The configured target is CUDA.
 If CUDA is unavailable, the command may run a small CPU diagnostic to confirm the software path, but it does not extrapolate that rate to CUDA and the gate remains blocked.
 On the requested device, the bounded model benchmark uses the locked large feature-hash candidate because it is the most resource-intensive permitted architecture.
+The final feasibility benchmark uses the locked training batch size and measured warm-up steps, so its compute projection does not extrapolate throughput across batch sizes.
 The configured real-data pilot may inspect no more than two prepared click-day partitions.
+
+Runs execute sequentially under the feasibility storage model.
+An active run reserves three full checkpoint copies for the current checkpoint, previous recoverable checkpoint, and atomic temporary write.
+After a completed run's sealed predictions and aggregate evidence are verified, its restricted row-level checkpoints and intermediate ledgers are pruned rather than treated as publishable retained artifacts.
+Only aggregate tables, manifests, and hashes contribute to retained artifact storage.
 
 The final configuration deliberately leaves these user and machine specific caps unset:
 

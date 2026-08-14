@@ -20,6 +20,10 @@ from latesignal.features.hashing import categorical_bucket
 from latesignal.models.conversion_mlp import CategoricalSpec, ConversionMLP
 
 BYTES_PER_GB = 1024**3
+CHECKPOINT_WORKING_COPIES = 3
+COMPLETED_CHECKPOINTS_RETAINED = 0
+REPORT_BYTES_PER_RUN = 250_000
+TRAINING_WARMUP_STEPS = 3
 HIGH_CARDINALITY_FIELDS = frozenset(
     {
         "audience_id",
@@ -66,15 +70,21 @@ def _benchmark(final: FinalExperimentConfig) -> dict[str, Any]:
     targets = torch.arange(batch_size, device=device, dtype=torch.float32) % 2
     optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4, weight_decay=1e-4)
     model.train()
-    _synchronize(device)
-    training_start = time.perf_counter()
-    for _ in range(final.pilot.benchmark_steps):
+
+    def train_step() -> None:
         optimizer.zero_grad(set_to_none=True)
         logits = model(categorical, numeric)
         loss = torch.nn.functional.binary_cross_entropy_with_logits(logits, targets)
         loss.backward()  # type: ignore[no-untyped-call]
         torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
         optimizer.step()
+
+    for _ in range(TRAINING_WARMUP_STEPS):
+        train_step()
+    _synchronize(device)
+    training_start = time.perf_counter()
+    for _ in range(final.pilot.benchmark_steps):
+        train_step()
     _synchronize(device)
     training_seconds = time.perf_counter() - training_start
     model.eval()
@@ -102,6 +112,8 @@ def _benchmark(final: FinalExperimentConfig) -> dict[str, Any]:
         "requested_device_available": available,
         "benchmark_scale": benchmark_scale,
         "model_parameters": model.parameter_count,
+        "training_batch_size": batch_size,
+        "training_warmup_steps": TRAINING_WARMUP_STEPS,
         "training_examples": final.pilot.benchmark_steps * batch_size,
         "training_seconds": training_seconds,
         "training_examples_per_second": final.pilot.benchmark_steps * batch_size / training_seconds,
@@ -208,7 +220,7 @@ def estimate_protocol(
     benchmark = _benchmark(final)
     real_pilot = _real_pilot(final, config_path)
     matrix = enumerate_matrix(protocol, final)
-    working_disk = (
+    base_working_disk = (
         final.pilot.assumed_source_archive_gb
         + final.pilot.assumed_expanded_source_gb
         + final.pilot.assumed_prepared_data_gb
@@ -222,13 +234,15 @@ def estimate_protocol(
         projection_valid = bool(benchmark["requested_device_available"])
         lower_hours = optimizer_examples / measured_rate / 3600.0 if projection_valid else None
         upper_hours = lower_hours * 1.5 if lower_hours is not None else None
-        checkpoint_gb = (
-            int(benchmark["checkpoint_bytes"])
-            * (matrix["total_online_credits"] + matrix["online_runs"])
-            / BYTES_PER_GB
+        checkpoint_working_gb = (
+            int(benchmark["checkpoint_bytes"]) * CHECKPOINT_WORKING_COPIES / BYTES_PER_GB
         )
-        report_gb = matrix["total_runs"] * 250_000 / BYTES_PER_GB
-        retained_disk = checkpoint_gb + report_gb
+        checkpoint_retained_gb = (
+            int(benchmark["checkpoint_bytes"]) * COMPLETED_CHECKPOINTS_RETAINED / BYTES_PER_GB
+        )
+        report_gb = matrix["total_runs"] * REPORT_BYTES_PER_RUN / BYTES_PER_GB
+        working_disk = base_working_disk + checkpoint_working_gb + report_gb
+        retained_disk = checkpoint_retained_gb + report_gb
         caps = final.caps
         cap_checks = {
             "runs": caps.max_runs is not None and matrix["total_runs"] <= caps.max_runs,
@@ -281,8 +295,13 @@ def estimate_protocol(
         "blockers": blockers,
         "assumptions": {
             "compute_upper_multiplier": 1.5,
-            "report_bytes_per_run": 250_000,
+            "report_bytes_per_run": REPORT_BYTES_PER_RUN,
+            "sequential_run_execution": True,
+            "checkpoint_working_copies": CHECKPOINT_WORKING_COPIES,
+            "completed_checkpoints_retained": COMPLETED_CHECKPOINTS_RETAINED,
+            "completed_row_level_artifacts_pruned_after_aggregate_verification": True,
             "quality_metrics_used_for_steps_choice": False,
             "cross_device_extrapolation": False,
+            "cross_batch_extrapolation": False,
         },
     }
