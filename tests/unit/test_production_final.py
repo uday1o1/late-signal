@@ -6,11 +6,18 @@ from pathlib import Path
 import pytest
 
 from latesignal.contracts.protocol import load_final_protocol
+from latesignal.contracts.selection import DelayedCandidate, ModelCandidate
 from latesignal.errors import ConsistencyError
 from latesignal.experiments.production_final import (
     FinalPlanInputs,
     ProductionFinalPlan,
     final_online_plans,
+)
+from latesignal.experiments.selection_dag import (
+    SelectionPlanInputs,
+    delayed_selection_plans,
+    model_selection_plans,
+    sampler_selection_plans,
 )
 
 
@@ -31,23 +38,60 @@ def _complete_fields(name: str, loss: float) -> dict[str, object]:
 
 def _inputs() -> FinalPlanInputs:
     _, protocol, protocol_sha256 = load_final_protocol(Path("configs/experiments/final.yaml"))
+    feature_hashes = {"compact": _digest("compact"), "large": _digest("large")}
+    selection_inputs = SelectionPlanInputs(
+        protocol=protocol,
+        protocol_sha256=protocol_sha256,
+        data_manifest_sha256=_digest("data"),
+        feature_policy_sha256=feature_hashes,
+        steps_per_credit=100,
+        device="cuda",
+    )
+    model_plan = next(
+        plan
+        for plan in model_selection_plans(selection_inputs)
+        if (
+            plan.learning_rate,
+            plan.weight_decay,
+            plan.dropout,
+            plan.feature_policy_sha256,
+        )
+        == (0.0003, 0.0001, 0.1, feature_hashes["large"])
+    )
+    model_fields = {
+        **_complete_fields("model", 0.1),
+        "config_sha256": model_plan.canonical_sha256,
+        "learning_rate": 0.0003,
+        "weight_decay": 0.0001,
+        "dropout": 0.1,
+        "feature_policy": "large",
+        "seed": 17,
+    }
+    model = ModelCandidate.model_validate(model_fields)
+    delayed_plan = next(
+        plan
+        for plan in delayed_selection_plans(selection_inputs, model)
+        if plan.method == "es_dfm" and plan.wait_days == 7
+    )
+    delayed_fields = {
+        **_complete_fields("delayed", 0.1),
+        "config_sha256": delayed_plan.canonical_sha256,
+        "method": "es_dfm",
+        "wait_days": 7,
+        "seed": 17,
+    }
+    delayed = DelayedCandidate.model_validate(delayed_fields)
+    sampler_plan = next(
+        plan
+        for plan in sampler_selection_plans(selection_inputs, model, delayed)
+        if plan.recent_window_days == 1 and plan.reservoir_capacity == 5_000_000
+    )
     decisions = {
-        "model": {
-            **_complete_fields("model", 0.1),
-            "learning_rate": 0.0003,
-            "weight_decay": 0.0001,
-            "dropout": 0.1,
-            "feature_policy": "large",
-            "seed": 17,
-        },
-        "delayed": {
-            **_complete_fields("delayed", 0.1),
-            "method": "es_dfm",
-            "wait_days": 7,
-            "seed": 17,
-        },
+        "model": model_fields,
+        "delayed": delayed_fields,
         "sampler": {
             **_complete_fields("sampler", 0.1),
+            "config_sha256": sampler_plan.canonical_sha256,
             "recent_window_days": 1,
             "reservoir_capacity": 5_000_000,
             "seed": 17,
@@ -77,7 +121,7 @@ def _inputs() -> FinalPlanInputs:
         protocol=protocol,
         protocol_sha256=protocol_sha256,
         protocol_lock=lock,
-        feature_policy_sha256={"compact": _digest("compact"), "large": _digest("large")},
+        feature_policy_sha256=feature_hashes,
     )
 
 
@@ -129,6 +173,14 @@ def test_final_lock_refuses_derived_method_or_wait_drift() -> None:
     derived["shared_wait_days"] = 14
 
     with pytest.raises(ConsistencyError, match="inconsistent selection decisions"):
+        final_online_plans(inputs)
+
+
+def test_final_lock_refuses_feature_policy_hash_drift() -> None:
+    inputs = _inputs()
+    inputs.feature_policy_sha256["large"] = _digest("changed-large")
+
+    with pytest.raises(ConsistencyError, match="feature policy or selection winner"):
         final_online_plans(inputs)
 
 

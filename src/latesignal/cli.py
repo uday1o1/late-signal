@@ -24,6 +24,7 @@ from latesignal.data.prepare import prepare_data
 from latesignal.errors import ExitCode, LateSignalError
 from latesignal.evaluation.runner import compare_run_dirs, evaluate_run_dir
 from latesignal.experiments.estimate import estimate_protocol
+from latesignal.experiments.production_final_runner import run_production_final
 from latesignal.experiments.production_selection_runner import run_production_selection
 from latesignal.experiments.protocol_lock import create_protocol_lock
 from latesignal.experiments.reproduction import reproduce_synthetic
@@ -47,9 +48,11 @@ protocol_app = typer.Typer(
 selection_app = typer.Typer(
     help="Run the frozen chronological selection study.", no_args_is_help=True
 )
+final_app = typer.Typer(help="Run the locked final experiment matrix.", no_args_is_help=True)
 app.add_typer(data_app, name="data")
 app.add_typer(protocol_app, name="protocol")
 app.add_typer(selection_app, name="selection")
+app.add_typer(final_app, name="final")
 
 ConfigOption = Annotated[
     Path,
@@ -77,6 +80,112 @@ JsonOption = Annotated[
     bool,
     typer.Option("--json", help="Emit newline-delimited machine-readable JSON."),
 ]
+
+
+@final_app.command("run")
+def final_run_command(
+    config: Annotated[
+        Path,
+        typer.Argument(
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+            help="Authored final experiment configuration.",
+        ),
+    ],
+    protocol_lock: Annotated[
+        Path,
+        typer.Option(
+            "--protocol-lock",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+            help="Verified pre-scoring protocol lock.",
+        ),
+    ],
+    data_manifest: Annotated[
+        Path,
+        typer.Option(
+            "--data-manifest",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+            help="Verified prepared-data manifest.",
+        ),
+    ],
+    feature_config: Annotated[
+        Path,
+        typer.Option(
+            "--feature-config",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+            help="Authored click-time feature policy.",
+        ),
+    ],
+    cache_root: Annotated[
+        Path,
+        typer.Option(
+            "--cache-root",
+            file_okay=False,
+            dir_okay=True,
+            resolve_path=True,
+            help="Ignored content-addressed runtime feature-cache root.",
+        ),
+    ],
+    out: Annotated[
+        Path,
+        typer.Option(
+            "--out",
+            file_okay=False,
+            dir_okay=True,
+            resolve_path=True,
+            help="Ignored durable final-study output root.",
+        ),
+    ],
+    device_uuid: Annotated[
+        str,
+        typer.Option(
+            "--device-uuid",
+            min=1,
+            help="Stable UUID of the sole CUDA device selected by the launcher.",
+        ),
+    ],
+    json_output: JsonOption = False,
+) -> None:
+    """Run or resume the exact 21 plus 12 final online experiments."""
+
+    try:
+        manifest = run_production_final(
+            config,
+            protocol_lock_path=protocol_lock,
+            data_manifest_path=data_manifest,
+            feature_config_path=feature_config,
+            cache_root=cache_root,
+            output_root=out,
+            device_uuid=device_uuid,
+            repository=Path.cwd(),
+        )
+    except LateSignalError as error:
+        _fail(error, json_output)
+    _emit(
+        {
+            "ok": True,
+            "status": manifest["status"],
+            "out": str(out),
+            "completed_count": manifest["completed_count"],
+            "manifest_sha256": manifest["manifest_sha256"],
+        },
+        json_output,
+    )
 
 
 @selection_app.command("run")

@@ -12,6 +12,12 @@ from latesignal.contracts.protocol import ProtocolDefinition, StrictModel
 from latesignal.contracts.selection import DelayedCandidate, ModelCandidate, SamplerCandidate
 from latesignal.data.manifests import canonical_json_bytes
 from latesignal.errors import ConsistencyError
+from latesignal.experiments.selection_dag import (
+    SelectionPlanInputs,
+    delayed_selection_plans,
+    model_selection_plans,
+    sampler_selection_plans,
+)
 
 FinalStudy = Literal["study_a", "study_b"]
 FinalMethod = Literal[
@@ -184,6 +190,61 @@ class FinalPlanInputs:
             for value in hashes
         ):
             raise ConsistencyError("Final protocol lock contains an invalid content identity")
+        selection_inputs = SelectionPlanInputs(
+            protocol=self.protocol,
+            protocol_sha256=self.protocol_sha256,
+            data_manifest_sha256=data_sha256,
+            feature_policy_sha256=self.feature_policy_sha256,
+            steps_per_credit=cast(int, steps),
+            device="cuda",
+        )
+        expected_model = next(
+            (
+                plan
+                for plan in model_selection_plans(selection_inputs)
+                if (
+                    plan.learning_rate,
+                    plan.weight_decay,
+                    plan.dropout,
+                    plan.feature_policy_sha256,
+                )
+                == (
+                    model.learning_rate,
+                    model.weight_decay,
+                    model.dropout,
+                    self.feature_policy_sha256[model.feature_policy],
+                )
+            ),
+            None,
+        )
+        expected_delayed = next(
+            (
+                plan
+                for plan in delayed_selection_plans(selection_inputs, model)
+                if (plan.method, plan.wait_days) == (delayed.method, delayed.wait_days)
+            ),
+            None,
+        )
+        expected_sampler = next(
+            (
+                plan
+                for plan in sampler_selection_plans(selection_inputs, model, delayed)
+                if (plan.recent_window_days, plan.reservoir_capacity)
+                == (sampler.recent_window_days, sampler.reservoir_capacity)
+            ),
+            None,
+        )
+        if (
+            expected_model is None
+            or expected_delayed is None
+            or expected_sampler is None
+            or expected_model.canonical_sha256 != model.config_sha256
+            or expected_delayed.canonical_sha256 != delayed.config_sha256
+            or expected_sampler.canonical_sha256 != sampler.config_sha256
+        ):
+            raise ConsistencyError(
+                "Final feature policy or selection winner changed after selection"
+            )
         return model, delayed, sampler, lock_sha256, data_sha256, cast(int, steps)
 
 

@@ -286,3 +286,38 @@ def verify_protocol_lock(path: Path) -> dict[str, Any]:
     if lock.get("status") != "locked" or lock.get("locked_before_final_scoring") is not True:
         raise ConsistencyError("Protocol lock is not authorized for final scoring")
     return lock
+
+
+def verify_locked_final_runtime(
+    lock: dict[str, Any],
+    *,
+    final_config_path: Path,
+    data_manifest_path: Path,
+    repository: Path,
+) -> dict[str, Any]:
+    """Require the current final runtime to equal the clean locked runtime."""
+
+    git = _git_identity(repository, allow_dirty=False)
+    environment = _environment(repository)
+    data = _verify_prepared_data(data_manifest_path)
+    final_config_sha256, _ = sha256_file(final_config_path)
+    environment_sha256 = hashlib.sha256(canonical_json_bytes(environment)).hexdigest()
+    if (
+        lock.get("status") != "locked"
+        or lock.get("publication_eligible") is not True
+        or lock.get("git") != git
+        or lock.get("environment") != environment
+        or lock.get("environment_sha256") != environment_sha256
+        or lock.get("data") != data
+        or lock.get("final_config_file_sha256") != final_config_sha256
+    ):
+        raise ConsistencyError(
+            "Current code, environment, data, or final configuration differs from the protocol lock"
+        )
+    return {
+        "git": git,
+        "environment": environment,
+        "environment_sha256": environment_sha256,
+        "data": data,
+        "final_config_file_sha256": final_config_sha256,
+    }
