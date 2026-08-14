@@ -19,10 +19,12 @@ from latesignal.simulator.production_oracle import SECONDS_PER_DAY, ProductionTr
 
 
 class SelectionEvaluationFeatures(Protocol):
-    prepared_manifest_sha256: str
     click_ids: NDArray[np.void]
     click_times: NDArray[np.float64]
     click_days: NDArray[np.int16]
+
+    @property
+    def prepared_manifest_sha256(self) -> str: ...
 
     def references_for_ids(self, click_ids: list[bytes]) -> NDArray[np.int32]: ...
 

@@ -24,6 +24,7 @@ from latesignal.data.prepare import prepare_data
 from latesignal.errors import ExitCode, LateSignalError
 from latesignal.evaluation.runner import compare_run_dirs, evaluate_run_dir
 from latesignal.experiments.estimate import estimate_protocol
+from latesignal.experiments.production_selection_runner import run_production_selection
 from latesignal.experiments.protocol_lock import create_protocol_lock
 from latesignal.experiments.reproduction import reproduce_synthetic
 from latesignal.experiments.runner import resume_synthetic_experiment, run_synthetic_experiment
@@ -43,8 +44,12 @@ data_app = typer.Typer(help="Acquire and audit the licensed source dataset.", no
 protocol_app = typer.Typer(
     help="Validate and estimate authored experiment matrices.", no_args_is_help=True
 )
+selection_app = typer.Typer(
+    help="Run the frozen chronological selection study.", no_args_is_help=True
+)
 app.add_typer(data_app, name="data")
 app.add_typer(protocol_app, name="protocol")
+app.add_typer(selection_app, name="selection")
 
 ConfigOption = Annotated[
     Path,
@@ -72,6 +77,108 @@ JsonOption = Annotated[
     bool,
     typer.Option("--json", help="Emit newline-delimited machine-readable JSON."),
 ]
+
+
+@selection_app.command("run")
+def selection_run_command(
+    config: Annotated[
+        Path,
+        typer.Argument(
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+            help="Authored final experiment configuration.",
+        ),
+    ],
+    data_manifest: Annotated[
+        Path,
+        typer.Option(
+            "--data-manifest",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+            help="Verified prepared-data manifest.",
+        ),
+    ],
+    feature_config: Annotated[
+        Path,
+        typer.Option(
+            "--feature-config",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+            help="Authored click-time feature policy.",
+        ),
+    ],
+    cache_root: Annotated[
+        Path,
+        typer.Option(
+            "--cache-root",
+            file_okay=False,
+            dir_okay=True,
+            resolve_path=True,
+            help="Ignored content-addressed runtime feature-cache root.",
+        ),
+    ],
+    out: Annotated[
+        Path,
+        typer.Option(
+            "--out",
+            file_okay=False,
+            dir_okay=True,
+            resolve_path=True,
+            help="Ignored durable selection output root.",
+        ),
+    ],
+    steps_per_credit: Annotated[
+        int,
+        typer.Option(
+            "--steps-per-credit",
+            min=1,
+            help="Feasibility-selected authored optimizer-step budget.",
+        ),
+    ],
+    device_uuid: Annotated[
+        str,
+        typer.Option(
+            "--device-uuid",
+            min=1,
+            help="Stable UUID of the CUDA device selected by the launcher.",
+        ),
+    ],
+    json_output: JsonOption = False,
+) -> None:
+    """Run or resume all 50 staged production-selection candidates."""
+
+    try:
+        manifest = run_production_selection(
+            config,
+            data_manifest_path=data_manifest,
+            feature_config_path=feature_config,
+            cache_root=cache_root,
+            output_root=out,
+            steps_per_credit=steps_per_credit,
+            device_uuid=device_uuid,
+            repository=Path.cwd(),
+        )
+    except LateSignalError as error:
+        _fail(error, json_output)
+    _emit(
+        {
+            "ok": True,
+            "status": manifest["status"],
+            "out": str(out),
+            "candidate_counts": manifest["candidate_counts"],
+            "selection_results_sha256": manifest["selection_results_sha256"],
+        },
+        json_output,
+    )
 
 
 @app.command("audit")

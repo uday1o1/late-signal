@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -93,7 +94,7 @@ class ProductionSelectionExecutor:
         self,
         *,
         output_root: Path,
-        features: dict[FeaturePolicyName, SelectionFeatureStore],
+        features: Mapping[FeaturePolicyName, SelectionFeatureStore],
         truth: ProductionTruthStore,
         monitoring_mask: NDArray[np.bool_],
         runtime_identity: dict[str, Any],
@@ -127,7 +128,7 @@ class ProductionSelectionExecutor:
             raise ConsistencyError("Selection requires a clean complete runtime identity")
         self.output_root = output_root.resolve()
         self.output_root.mkdir(parents=True, exist_ok=True)
-        self.features = features
+        self.features = dict(features)
         self.truth = truth
         self.monitoring_mask = np.array(monitoring_mask, dtype=np.bool_, copy=True)
         self.runtime_identity = dict(runtime_identity)

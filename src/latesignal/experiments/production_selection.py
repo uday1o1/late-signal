@@ -49,11 +49,15 @@ SelectionMethod = Literal["complete_wait", "fixed_wait", "es_dfm"]
 
 
 class SelectionFeatureStore(Protocol):
-    prepared_manifest_sha256: str
-    feature_policy_sha256: str
     click_ids: NDArray[np.void]
     click_times: NDArray[np.float64]
     click_days: NDArray[np.int16]
+
+    @property
+    def prepared_manifest_sha256(self) -> str: ...
+
+    @property
+    def feature_policy_sha256(self) -> str: ...
 
     @property
     def categorical_specs(self) -> dict[str, CategoricalSpec]: ...
