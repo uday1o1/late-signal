@@ -32,6 +32,7 @@ from latesignal.experiments.study_b import run_study_b
 from latesignal.features.policy import load_feature_policy
 from latesignal.reporting.model import load_report_input
 from latesignal.reporting.render import render_report
+from latesignal.security.repository import audit_repository
 
 app = typer.Typer(
     name="latesignal",
@@ -71,6 +72,19 @@ JsonOption = Annotated[
     bool,
     typer.Option("--json", help="Emit newline-delimited machine-readable JSON."),
 ]
+
+
+@app.command("audit")
+def audit_command(json_output: JsonOption = False) -> None:
+    """Audit the repository for restricted artifacts, secrets, and release hygiene."""
+
+    try:
+        result = audit_repository(Path.cwd())
+    except LateSignalError as error:
+        _fail(error, json_output)
+    _emit({"ok": result["status"] == "passed", **result}, json_output)
+    if result["status"] != "passed":
+        raise typer.Exit(code=int(ExitCode.CONSISTENCY_FAILURE))
 
 
 def _protocol_result(config: Path) -> dict[str, Any]:
