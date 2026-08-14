@@ -37,6 +37,7 @@ def test_remote_gpu_script_help_is_safe_and_bounded() -> None:
     assert "prepared dataset" in result.stdout
     assert "does not start" in result.stdout
     assert "source archive" in result.stdout
+    assert "hard-limited" in result.stdout
 
 
 def test_remote_gpu_script_uses_existing_https_credentials_without_reading_them() -> None:
@@ -60,6 +61,17 @@ def test_remote_gpu_script_preserves_immutable_results_per_revision() -> None:
 
     assert "gpu${GPU_INDEX}-${LOCAL_HEAD:0:12}.json" in source
     assert 'RESULT_RELATIVE="runs/feasibility/gpu${GPU_INDEX}.json"' not in source
+
+
+def test_remote_gpu_script_hard_limits_the_authorized_probe() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+
+    subprocess.run(["bash", "-n", str(SCRIPT)], check=True)
+    assert "readonly MAX_BENCHMARK_SECONDS=600" in source
+    assert "command -v timeout >/dev/null 2>&1" in source
+    assert "--signal=TERM" in source
+    assert "--kill-after=30s" in source
+    assert '"${max_benchmark_seconds}s"' in source
 
 
 def test_one_shot_gpu_scripts_are_valid_and_explain_detached_operation() -> None:

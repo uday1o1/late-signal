@@ -6,6 +6,7 @@ readonly UV_VERSION="0.11.23"
 readonly MIN_DISK_GB=25
 readonly MIN_MEMORY_GB=16
 readonly MIN_VRAM_MIB=8192
+readonly MAX_BENCHMARK_SECONDS=600
 
 usage() {
   cat <<'EOF'
@@ -14,7 +15,8 @@ Usage: bash tools/run-gpu-feasibility.sh SSH_HOST [GPU_INDEX]
 Prepare a trusted SSH-accessible NVIDIA GPU host and run LateSignal's bounded
 feasibility benchmark. The script transfers only the verified prepared dataset,
 not the licensed source archive or extracted raw file. It does not start the
-selection matrix or final experiments.
+selection matrix or final experiments. The benchmark process is hard-limited
+to 10 minutes.
 
 Arguments:
   SSH_HOST   SSH configuration alias or user@host target.
@@ -96,7 +98,8 @@ ssh "$SSH_HOST" bash -s -- \
   "$GPU_INDEX" \
   "$MIN_DISK_GB" \
   "$MIN_MEMORY_GB" \
-  "$MIN_VRAM_MIB" <<'REMOTE_SETUP'
+  "$MIN_VRAM_MIB" \
+  "$MAX_BENCHMARK_SECONDS" <<'REMOTE_SETUP'
 set -Eeuo pipefail
 
 remote_root="$1"
@@ -106,6 +109,7 @@ gpu_index="$4"
 min_disk_gb="$5"
 min_memory_gb="$6"
 min_vram_mib="$7"
+max_benchmark_seconds="$8"
 
 if [[ ! -d "$remote_root/.git" ]]; then
   GIT_TERMINAL_PROMPT=0 git \
@@ -139,6 +143,14 @@ actual_head="$(git -C "$remote_root" rev-parse HEAD)"
 
 command -v nvidia-smi >/dev/null 2>&1 || {
   printf 'error: nvidia-smi is unavailable on the remote host\n' >&2
+  exit 1
+}
+command -v timeout >/dev/null 2>&1 || {
+  printf 'error: timeout is unavailable on the remote host\n' >&2
+  exit 1
+}
+[[ "$max_benchmark_seconds" =~ ^[1-9][0-9]*$ ]] || {
+  printf 'error: benchmark timeout is invalid\n' >&2
   exit 1
 }
 
@@ -204,13 +216,15 @@ ssh "$SSH_HOST" bash -s -- \
   "$REMOTE_ROOT" \
   "$GPU_INDEX" \
   "$UV_VERSION" \
-  "$RESULT_RELATIVE" <<'REMOTE_BENCHMARK'
+  "$RESULT_RELATIVE" \
+  "$MAX_BENCHMARK_SECONDS" <<'REMOTE_BENCHMARK'
 set -Eeuo pipefail
 
 remote_root="$1"
 gpu_index="$2"
 uv_version="$3"
 result_relative="$4"
+max_benchmark_seconds="$5"
 uv_environment="$HOME/.local/share/latesignal/uv-$uv_version"
 uv_bin="$uv_environment/bin/uv"
 
@@ -238,7 +252,11 @@ print(
 PY
 
 set +e
-CUDA_VISIBLE_DEVICES="$gpu_index" "$uv_bin" run latesignal protocol estimate \
+CUDA_VISIBLE_DEVICES="$gpu_index" timeout \
+  --signal=TERM \
+  --kill-after=30s \
+  "${max_benchmark_seconds}s" \
+  "$uv_bin" run latesignal protocol estimate \
   configs/experiments/final.yaml \
   --out "$result_relative" \
   --json
