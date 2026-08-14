@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import pytest
 from sklearn.metrics import average_precision_score, roc_auc_score  # type: ignore[import-untyped]
 
@@ -12,7 +13,13 @@ from latesignal.evaluation.analysis import (
     compute_pareto_table,
     validate_intermediate_budget,
 )
-from latesignal.evaluation.bootstrap import _metric, paired_block_bootstrap
+from latesignal.evaluation.bootstrap import (
+    _metric,
+    compact_bootstrap_metrics,
+    contiguous_day_bootstrap_weights,
+    paired_block_bootstrap,
+    paired_compact_interval,
+)
 from latesignal.evaluation.compare import compare_methods, scheduler_success
 from latesignal.evaluation.metrics import classification_metrics
 from latesignal.evaluation.slices import evaluate_slices
@@ -129,6 +136,103 @@ def test_optimized_bootstrap_auc_metrics_match_sklearn_with_ties() -> None:
 
     assert _metric(rows, "pr_auc") == pytest.approx(average_precision_score(labels, probabilities))
     assert _metric(rows, "roc_auc") == pytest.approx(roc_auc_score(labels, probabilities))
+
+
+def test_compact_bootstrap_matches_explicit_resampling_with_ties() -> None:
+    days = np.repeat(np.arange(65, 90, dtype=np.int16), 4)
+    labels = np.tile(np.asarray([0, 1, 0, 1], dtype=np.int8), 25)
+    probabilities = np.tile(np.asarray([0.1, 0.8, 0.4, 0.8], dtype=np.float64), 25)
+
+    result = compact_bootstrap_metrics(
+        labels,
+        probabilities,
+        days,
+        block_days=3,
+        replicates=2_000,
+        batch_replicates=31,
+    )
+
+    assert result.point["pr_auc"] == pytest.approx(
+        average_precision_score(labels, probabilities), abs=1e-12
+    )
+    assert result.point["roc_auc"] == pytest.approx(roc_auc_score(labels, probabilities), abs=1e-12)
+    rows = [
+        EvaluationExample(
+            click_id=f"compact-{index}",
+            click_day=int(day),
+            final_label=int(label),
+            probability=float(probability),
+            cold_user=True,
+            cold_product=True,
+            prior_user_clicks=0,
+            prior_product_clicks=0,
+            product_price_bin="low",
+            device_type="mobile",
+            conversion_delay_days=1.0 if label else None,
+        )
+        for index, (day, label, probability) in enumerate(
+            zip(days, labels, probabilities, strict=True)
+        )
+    ]
+    for replicate in range(5):
+        sampled = [
+            row
+            for day_index, count in enumerate(result.day_weights[replicate])
+            for _ in range(int(count))
+            for row in rows
+            if row.click_day == 65 + day_index
+        ]
+        for metric in ("log_loss", "brier_score", "pr_auc", "roc_auc"):
+            assert result.replicates[metric][replicate] == pytest.approx(
+                _metric(sampled, metric), abs=1e-12
+            )
+
+
+def test_compact_bootstrap_day_weights_are_deterministic_and_bounded() -> None:
+    days = np.arange(65, 90, dtype=np.int16)
+
+    first = contiguous_day_bootstrap_weights(days, block_days=7, replicates=2_000)
+    repeated = contiguous_day_bootstrap_weights(days, block_days=7, replicates=2_000)
+
+    np.testing.assert_array_equal(first, repeated)
+    assert first.shape == (2_000, 25)
+    assert np.all(first.sum(axis=1) == 25)
+    assert first.max() <= 25
+
+
+def test_compact_paired_interval_averages_matched_seed_replicates() -> None:
+    days = np.repeat(np.arange(65, 90, dtype=np.int16), 4)
+    labels = np.tile(np.asarray([0, 1, 0, 1], dtype=np.int8), 25)
+    control_probability = np.where(labels == 1, 0.65, 0.35).astype(np.float64)
+    candidate_probability = np.where(labels == 1, 0.8, 0.2).astype(np.float64)
+    control = {
+        seed: compact_bootstrap_metrics(
+            labels,
+            control_probability,
+            days,
+            block_days=3,
+            replicates=2_000,
+            batch_replicates=29,
+        )
+        for seed in SEEDS
+    }
+    candidate = {
+        seed: compact_bootstrap_metrics(
+            labels,
+            candidate_probability,
+            days,
+            block_days=3,
+            replicates=2_000,
+            batch_replicates=29,
+        )
+        for seed in SEEDS
+    }
+
+    interval = paired_compact_interval(control, candidate, metric="log_loss")
+
+    assert interval.point_difference < 0.0
+    assert interval.upper_95 < 0.0
+    assert [item.seed for item in interval.seed_differences] == [17, 41, 73]
 
 
 def test_empty_and_low_support_slices_are_reported_without_metrics() -> None:
