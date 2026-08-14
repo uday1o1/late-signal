@@ -37,7 +37,7 @@ class RuntimeFeatureStore:
         self.categorical_fields = tuple(sorted(CATEGORICAL_CLICK_FIELDS))
         self.numeric_fields = tuple(sorted(NUMERIC_CLICK_FIELDS))
         rows = cache.rows
-        self.click_ids: NDArray[np.bytes_] = np.empty(rows, dtype="S32")
+        self.click_ids: NDArray[np.void] = np.empty(rows, dtype="V32")
         self.click_times = np.empty(rows, dtype=np.float64)
         self.click_days = np.empty(rows, dtype=np.int16)
         self.categorical = np.empty((rows, len(self.categorical_fields)), dtype=np.uint32)
@@ -58,7 +58,7 @@ class RuntimeFeatureStore:
                 end = cursor + count
                 if end > rows:
                     raise ConsistencyError("Runtime feature cache exceeds its declared row count")
-                self.click_ids[cursor:end] = np.asarray(table["click_id"].to_pylist(), dtype="S32")
+                self.click_ids[cursor:end] = np.asarray(table["click_id"].to_pylist(), dtype="V32")
                 self.click_times[cursor:end] = table["click_time_seconds"].to_numpy(
                     zero_copy_only=False
                 )
@@ -141,6 +141,10 @@ class RuntimeFeatureStore:
         if len(lookup) != self.cache.rows:
             raise ConsistencyError("Runtime feature cache contains duplicate click IDs")
         return lookup
+
+    @property
+    def prepared_manifest_sha256(self) -> str:
+        return self.cache.prepared_manifest_sha256
 
     @property
     def id_lookup(self) -> dict[bytes, int]:

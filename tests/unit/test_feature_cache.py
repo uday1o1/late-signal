@@ -48,7 +48,7 @@ def _prepared(root: Path, *, add_truth_column: bool = False) -> Path:
     feature = root / "features" / "click_day=000" / "part-00000.parquet"
     feature.parent.mkdir(parents=True)
     rows: dict[str, list[object]] = {
-        "click_id": ["1" * 64, "2" * 64],
+        "click_id": ["1" * 64, "2" * 62 + "00"],
         "click_time_seconds": [0.0, 1.0],
         "click_day": [0, 0],
         "cold_user": [True, False],
@@ -165,7 +165,7 @@ def test_runtime_feature_store_serves_stable_references_and_tensors(tmp_path: Pa
     )
 
     store = RuntimeFeatureStore(cache)
-    references = store.references_for_ids([bytes.fromhex("2" * 64), bytes.fromhex("1" * 64)])
+    references = store.references_for_ids([bytes.fromhex("2" * 62 + "00"), bytes.fromhex("1" * 64)])
     batch = store.tensor_batch(references)
 
     assert references.tolist() == [1, 0]
