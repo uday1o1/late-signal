@@ -1,0 +1,84 @@
+# Experimental protocol
+
+LateSignal separates protocol authoring, selection, final replay, and final-period evaluation.
+The separation is enforced so outcomes from the final period cannot influence configuration choices.
+
+## Locked chronology
+
+Click days 0 through 14 form burn-in.
+Click days 25 through 34 are the only days whose outcomes may select model, delayed-method, and sampler parameters.
+Click days 35 through 64 form a maturity embargo.
+Their eventual outcomes cannot influence any selection or threshold.
+Click days 65 through 89 form the sealed final evaluation period.
+
+The final replay starts again at day 0 after the protocol is locked.
+Predictions for days 65 through 89 must be persisted and sealed before eventual final truth is evaluated.
+
+## Authored candidate sets
+
+[`configs/protocol.yaml`](../configs/protocol.yaml) contains the complete finite selection spaces required by the build plan.
+Strict validation rejects unknown keys, duplicate values, missing candidates, changed final seeds, and a narrowed final matrix.
+
+Selection is staged in this order:
+
+1. Select learning rate, weight decay, dropout, and feature-hash policy under complete-cohort training.
+2. Select delayed-method parameters under the selected model.
+3. Select sampler parameters under the selected deployable method.
+
+Each stage minimizes selection-period mean log loss under its fixed compute cap.
+An exact metric tie within `1e-6` prefers lower measured compute, then fewer parameters, then the lexicographically smaller canonical configuration hash.
+The complete attempted candidate table must be retained, including failed and incomplete runs.
+
+## Feasibility gate
+
+Run the estimator before any full selection or final matrix:
+
+```bash
+uv run latesignal protocol estimate configs/experiments/final.yaml --json
+```
+
+The estimator expands the authored matrix rather than accepting a hand-entered run count.
+The current extended V1 matrix contains 89 runs, of which 83 are online runs, and 1,883 online update credits.
+It projects every allowed steps-per-credit candidate and chooses the largest candidate that fits every cap without consulting a quality metric.
+
+The configured target is CUDA.
+If CUDA is unavailable, the command may run a small CPU diagnostic to confirm the software path, but it does not extrapolate that rate to CUDA and the gate remains blocked.
+On the requested device, the bounded model benchmark uses the locked large feature-hash candidate because it is the most resource-intensive permitted architecture.
+The configured real-data pilot may inspect no more than two prepared click-day partitions.
+
+The final configuration deliberately leaves these user and machine specific caps unset:
+
+- Maximum total runs.
+- Maximum GPU hours.
+- Maximum working disk in GiB.
+- Maximum retained artifact disk in GiB.
+
+All four values must describe the actual final-run machine and storage budget.
+An unset cap is a failing gate, not an unlimited budget.
+The final gate also fails when the requested accelerator is unavailable, the required real-data pilot is unavailable, or no steps-per-credit candidate fits.
+
+Run strict validation after supplying caps and making the prepared data and accelerator available:
+
+```bash
+uv run latesignal protocol validate configs/experiments/final.yaml --json
+```
+
+Exit code `0` means every feasibility requirement passed.
+Exit code `1` means the experimental gate was not met and the JSON `blockers` list identifies the prerequisites.
+Configuration errors use exit code `2`.
+
+## Uncertainty and scheduler claim
+
+Final comparisons require the same persisted click IDs, truth labels, click days, and three training seeds for both methods.
+The primary paired bootstrap uses three-day contiguous blocks and at least 2,000 replicates.
+One-day and seven-day block results are locked sensitivity analyses.
+
+The calibration scheduler is supported only when every predeclared condition passes against fixed deadline.
+Those conditions cover paired log loss, bounded Brier and expected-calibration-error degradation, identical core compute, consistent seed signs, and no reversal in either block-size sensitivity.
+Failure of any condition produces a negative or inconclusive result rather than a relaxed claim.
+
+## External prerequisites
+
+The authored final configuration cannot pass until the official prepared dataset, an NVIDIA CUDA machine, and actual resource caps are available together.
+The public CLI reports this blocked state explicitly.
+No final-period result may be inspected to remove or reduce those requirements.

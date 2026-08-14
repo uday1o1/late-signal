@@ -11,6 +11,7 @@ import typer
 import yaml
 
 from latesignal.contracts.config import load_synthetic_config
+from latesignal.contracts.protocol import load_final_protocol
 from latesignal.contracts.study_a import load_study_a_config
 from latesignal.contracts.study_b import load_study_b_config
 from latesignal.data.config import load_data_config
@@ -18,6 +19,8 @@ from latesignal.data.download import FetchNotice, fetch_dataset
 from latesignal.data.inspect import inspect_locked_archive
 from latesignal.data.prepare import prepare_data
 from latesignal.errors import ExitCode, LateSignalError
+from latesignal.evaluation.runner import compare_run_dirs, evaluate_run_dir
+from latesignal.experiments.estimate import estimate_protocol
 from latesignal.experiments.runner import resume_synthetic_experiment, run_synthetic_experiment
 from latesignal.experiments.study_a import run_study_a
 from latesignal.experiments.study_b import run_study_b
@@ -29,7 +32,11 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 data_app = typer.Typer(help="Acquire and audit the licensed source dataset.", no_args_is_help=True)
+protocol_app = typer.Typer(
+    help="Validate and estimate authored experiment matrices.", no_args_is_help=True
+)
 app.add_typer(data_app, name="data")
+app.add_typer(protocol_app, name="protocol")
 
 ConfigOption = Annotated[
     Path,
@@ -57,6 +64,121 @@ JsonOption = Annotated[
     bool,
     typer.Option("--json", help="Emit newline-delimited machine-readable JSON."),
 ]
+
+
+def _protocol_result(config: Path) -> dict[str, Any]:
+    final, protocol, protocol_sha256 = load_final_protocol(config)
+    return estimate_protocol(
+        final,
+        protocol,
+        config_path=config,
+        protocol_sha256=protocol_sha256,
+    )
+
+
+@protocol_app.command("estimate")
+def protocol_estimate(
+    config: Annotated[
+        Path,
+        typer.Argument(
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+            help="Authored final experiment configuration.",
+        ),
+    ],
+    json_output: JsonOption = False,
+) -> None:
+    """Benchmark the local stack and project the exact authored matrix."""
+
+    try:
+        result = _protocol_result(config)
+    except LateSignalError as error:
+        _fail(error, json_output)
+    _emit({"ok": result["status"] == "passed", **result}, json_output)
+    if result["status"] != "passed":
+        raise typer.Exit(code=int(ExitCode.GATE_NOT_MET))
+
+
+@protocol_app.command("validate")
+def protocol_validate(
+    config: Annotated[
+        Path,
+        typer.Argument(
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+            help="Authored final experiment configuration.",
+        ),
+    ],
+    json_output: JsonOption = False,
+) -> None:
+    """Require the matrix, pilot, accelerator, and authored caps to pass."""
+
+    protocol_estimate(config, json_output)
+
+
+@app.command("evaluate")
+def evaluate_command(
+    run_dir: Annotated[
+        Path,
+        typer.Argument(
+            exists=True,
+            file_okay=False,
+            dir_okay=True,
+            readable=True,
+            resolve_path=True,
+            help="Run directory containing a sealed evaluation-input.json.",
+        ),
+    ],
+    json_output: JsonOption = False,
+) -> None:
+    """Evaluate one sealed final-period prediction ledger."""
+
+    try:
+        result = evaluate_run_dir(run_dir)
+    except LateSignalError as error:
+        _fail(error, json_output)
+    _emit(result, json_output)
+
+
+@app.command("compare")
+def compare_command(
+    run_dirs: Annotated[
+        list[Path],
+        typer.Argument(
+            exists=True,
+            file_okay=False,
+            dir_okay=True,
+            readable=True,
+            resolve_path=True,
+            help="Matched sealed run directories for both methods and every seed.",
+        ),
+    ],
+    control: Annotated[str, typer.Option("--control", help="Primary control method name.")],
+    candidate: Annotated[str, typer.Option("--candidate", help="Candidate method name.")],
+    replicates: Annotated[
+        int,
+        typer.Option("--replicates", min=2_000, help="Paired bootstrap replicates."),
+    ] = 2_000,
+    json_output: JsonOption = False,
+) -> None:
+    """Compare two methods with matched final clicks and training seeds."""
+
+    try:
+        result = compare_run_dirs(
+            tuple(run_dirs),
+            control_method=control,
+            candidate_method=candidate,
+            replicates=replicates,
+        )
+    except LateSignalError as error:
+        _fail(error, json_output)
+    _emit({"ok": True, "status": "complete", **result}, json_output)
 
 
 @app.command("run")
