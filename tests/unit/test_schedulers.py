@@ -192,3 +192,33 @@ def test_monitoring_membership_is_stable_and_sampler_rejects_monitoring_ids() ->
 
     with pytest.raises(ConsistencyError, match="Monitoring record"):
         sampler.add(record, 0)
+
+
+@pytest.mark.parametrize("policy", ["early", "midpoint", "deadline"])
+def test_fixed_scheduler_checkpoint_round_trip(policy: str) -> None:
+    scheduler = FixedWindowScheduler(build_credit_windows(origin=0), policy=policy)
+    for day in range(31, 38):
+        scheduler.decide(day * DAY, _empty_evidence(day))
+    checkpoint = scheduler.state_dict()
+    restored = FixedWindowScheduler(build_credit_windows(origin=0), policy=policy)
+
+    restored.load_state_dict(checkpoint)
+
+    assert restored.state_dict() == checkpoint
+
+
+def test_calibration_scheduler_checkpoint_round_trip_and_corruption_rejection() -> None:
+    scheduler = CalibrationDriftCreditScheduler(build_credit_windows(origin=0))
+    for day in range(31, 38):
+        scheduler.decide(day * DAY, _empty_evidence(day))
+    checkpoint = scheduler.state_dict()
+    restored = CalibrationDriftCreditScheduler(build_credit_windows(origin=0))
+    restored.load_state_dict(checkpoint)
+    assert restored.state_dict() == checkpoint
+
+    decisions = checkpoint["decisions"]
+    assert isinstance(decisions, list)
+    assert isinstance(decisions[0], dict)
+    decisions[0]["decision_time"] = 32 * DAY
+    with pytest.raises(ConsistencyError, match="daily and contiguous"):
+        CalibrationDriftCreditScheduler(build_credit_windows(origin=0)).load_state_dict(checkpoint)

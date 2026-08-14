@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import copy
+from typing import Any
+
 from latesignal.errors import ConsistencyError
 from latesignal.scheduling.base import WindowedScheduler
 from latesignal.scheduling.credit import CreditWindow, SpendDecision
@@ -52,8 +55,49 @@ class FixedWindowScheduler(WindowedScheduler):
 
     def state_dict(self) -> dict[str, object]:
         state = super().state_dict()
-        state.update({"policy": self.policy, "monitoring_log": self.monitoring_log})
+        state.update({"policy": self.policy, "monitoring_log": copy.deepcopy(self.monitoring_log)})
         return state
+
+    def load_state_dict(self, state: dict[str, Any]) -> None:
+        if state.get("policy") != self.policy:
+            raise ConsistencyError("Fixed scheduler checkpoint policy changed")
+        monitoring_log = state.get("monitoring_log")
+        decisions = self._load_common_state(
+            state,
+            extra_keys={"policy", "monitoring_log"},
+        )
+        if (
+            not isinstance(monitoring_log, list)
+            or not all(isinstance(value, dict) for value in monitoring_log)
+            or len(monitoring_log) != len(decisions)
+        ):
+            raise ConsistencyError("Fixed scheduler monitoring checkpoint is malformed")
+        spent: set[int] = set()
+        for decision in decisions:
+            window = self.windows[decision.window_id]
+            target = {
+                "early": window.early_time,
+                "midpoint": window.midpoint_time,
+                "deadline": window.deadline_time,
+            }[self.policy]
+            expected_spend = decision.window_id not in spent and decision.decision_time == target
+            expected_reason = (
+                f"fixed_{self.policy}"
+                if expected_spend
+                else "already_spent"
+                if decision.window_id in spent
+                else "waiting"
+            )
+            if (
+                decision.spend != expected_spend
+                or decision.reason != expected_reason
+                or decision.score is not None
+                or decision.contributing_bin is not None
+            ):
+                raise ConsistencyError("Fixed scheduler checkpoint decision is inconsistent")
+            if decision.spend:
+                spent.add(decision.window_id)
+        self.monitoring_log = copy.deepcopy(monitoring_log)
 
 
 class FixedDailyScheduler:
