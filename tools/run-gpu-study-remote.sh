@@ -13,7 +13,7 @@ readonly GPU_ACCOUNTING_RESERVE_SECONDS=120
 
 usage() {
   cat <<'EOF'
-Usage: tools/run-gpu-study-remote.sh REPO_ROOT JOB_ROOT GPU_UUID EXPECTED_COMMIT LAUNCH_ID
+Usage: tools/run-gpu-study-remote.sh REPO_ROOT JOB_ROOT GPU_UUID EXPECTED_COMMIT LAUNCH_ID [PRIOR_GPU_SECONDS]
 
 Internal commit-pinned driver for LateSignal's one-shot GPU study.
 Use tools/gpu-study.sh from the submitting Mac instead of invoking this
@@ -31,7 +31,7 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
   exit 0
 fi
 
-(( $# == 5 )) || {
+(( $# == 5 || $# == 6 )) || {
   usage >&2
   exit 2
 }
@@ -41,6 +41,7 @@ readonly JOB_ROOT="$2"
 readonly GPU_UUID="$3"
 readonly EXPECTED_COMMIT="$4"
 readonly LAUNCH_ID="$5"
+readonly IMPORTED_GPU_SECONDS="${6:-0}"
 readonly COMMIT_SHORT="${EXPECTED_COMMIT:0:12}"
 readonly CACHE_ROOT="$JOB_ROOT/runtime-cache"
 readonly DATA_MANIFEST="$REPO_ROOT/data/processed/manifests/preparation.json"
@@ -64,6 +65,7 @@ readonly UV_BIN="$UV_ENVIRONMENT/bin/uv"
 [[ "$GPU_UUID" =~ ^GPU-[A-Za-z0-9-]+$ ]] || die "GPU UUID is malformed"
 [[ "$EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]] || die "expected commit is malformed"
 [[ "$LAUNCH_ID" =~ ^[A-Za-z0-9-]+$ ]] || die "launch ID is malformed"
+[[ "$IMPORTED_GPU_SECONDS" =~ ^[0-9]+$ ]] || die "prior GPU accounting is malformed"
 [[ -f "$DATA_MANIFEST" && -f "$FINAL_CONFIG" && -f "$FEATURE_CONFIG" ]] || \
   die "required repository inputs are missing"
 [[ ! -L "$JOB_ROOT" ]] || die "job root cannot be a symbolic link"
@@ -103,17 +105,22 @@ attempt=0
 watchdog_pid=""
 readonly START_EPOCH="$(date +%s)"
 readonly MAIN_PID="$$"
-previous_gpu_seconds=0
+previous_gpu_seconds="$IMPORTED_GPU_SECONDS"
 if [[ -f "$JOB_ROOT/heartbeat.json" ]]; then
   parsed_gpu_seconds="$(
     sed -n 's/.*"gpu_active_seconds":\([0-9][0-9]*\).*/\1/p' \
       "$JOB_ROOT/heartbeat.json" | tail -n 1
   )"
   if [[ "$parsed_gpu_seconds" =~ ^[0-9]+$ ]]; then
-    previous_gpu_seconds="$((parsed_gpu_seconds + GPU_ACCOUNTING_RESERVE_SECONDS))"
+    if (( parsed_gpu_seconds > previous_gpu_seconds )); then
+      previous_gpu_seconds="$parsed_gpu_seconds"
+    fi
   else
     die "existing heartbeat has invalid accumulated GPU time"
   fi
+fi
+if (( previous_gpu_seconds > 0 )); then
+  previous_gpu_seconds="$((previous_gpu_seconds + GPU_ACCOUNTING_RESERVE_SECONDS))"
 fi
 readonly PREVIOUS_GPU_SECONDS="${previous_gpu_seconds:-0}"
 main_pgid="$(ps -o pgid= -p "$MAIN_PID" | tr -d '[:space:]')"
@@ -481,6 +488,11 @@ PY
 }
 
 run_selection() {
+  if [[ -f "$JOB_ROOT/selection-provenance.json" ]]; then
+    python3 "$REPO_ROOT/tools/prepare-selection-resume.py" \
+      verify "$JOB_ROOT" "$EXPECTED_COMMIT"
+    return
+  fi
   "$UV_BIN" run latesignal selection run "$FINAL_CONFIG" \
     --data-manifest "$DATA_MANIFEST" \
     --feature-config "$FEATURE_CONFIG" \

@@ -4,7 +4,7 @@ set -Eeuo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: tools/start-gpu-study-remote.sh REPO_ROOT JOB_ROOT GPU_UUID EXPECTED_COMMIT SESSION LAUNCH_ID
+Usage: tools/start-gpu-study-remote.sh REPO_ROOT JOB_ROOT GPU_UUID EXPECTED_COMMIT SESSION LAUNCH_ID [PRIOR_GPU_SECONDS]
 
 Internal detached tmux starter for LateSignal's one-shot GPU study.
 Use tools/gpu-study.sh from the submitting Mac instead of invoking this
@@ -17,7 +17,7 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
   exit 0
 fi
 
-(( $# == 6 )) || {
+(( $# == 6 || $# == 7 )) || {
   usage >&2
   exit 2
 }
@@ -28,6 +28,7 @@ readonly GPU_UUID="$3"
 readonly EXPECTED_COMMIT="$4"
 readonly SESSION="$5"
 readonly LAUNCH_ID="$6"
+readonly PRIOR_GPU_SECONDS="${7:-0}"
 
 [[ "$REPO_ROOT" =~ ^/[A-Za-z0-9._/-]+$ && "$REPO_ROOT" != *..* ]] || exit 2
 [[ "$JOB_ROOT" =~ ^/[A-Za-z0-9._/-]+$ && "$JOB_ROOT" != *..* ]] || exit 2
@@ -35,8 +36,9 @@ readonly LAUNCH_ID="$6"
 [[ "$EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]] || exit 2
 [[ "$SESSION" =~ ^latesignal-[0-9a-f]{12}$ ]] || exit 2
 [[ "$LAUNCH_ID" =~ ^[A-Za-z0-9-]+$ ]] || exit 2
+[[ "$PRIOR_GPU_SECONDS" =~ ^[0-9]+$ ]] || exit 2
 
-command_line="exec setsid --fork --wait bash '$REPO_ROOT/tools/run-gpu-study-remote.sh' '$REPO_ROOT' '$JOB_ROOT' '$GPU_UUID' '$EXPECTED_COMMIT' '$LAUNCH_ID'"
+command_line="exec setsid --fork --wait bash '$REPO_ROOT/tools/run-gpu-study-remote.sh' '$REPO_ROOT' '$JOB_ROOT' '$GPU_UUID' '$EXPECTED_COMMIT' '$LAUNCH_ID' '$PRIOR_GPU_SECONDS'"
 tmux new-session -d -s "$SESSION" "$command_line"
 for _ in $(seq 1 30); do
   if grep -q "\"launch_id\":\"$LAUNCH_ID\"" "$JOB_ROOT/started.json" 2>/dev/null; then

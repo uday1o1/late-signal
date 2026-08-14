@@ -31,9 +31,11 @@ def _job(root: Path) -> Path:
 
 def test_collection_manifest_seals_exact_aggregate_only_files(tmp_path: Path) -> None:
     root = _job(tmp_path / "job")
+    (root / "selection-provenance.json").write_text("{}\n", encoding="utf-8")
     manifest = build_collection_manifest(root)
 
     assert manifest["status"] == "verified_aggregate_only"
+    assert "selection-provenance.json" in {item["path"] for item in manifest["files"]}
     assert verify_collection_manifest(root, root / "collection-manifest.json") == manifest
 
     (root / "unexpected.json").write_text("{}\n", encoding="utf-8")

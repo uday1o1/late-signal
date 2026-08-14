@@ -65,6 +65,9 @@ def build_collection_manifest(job_root: Path) -> dict[str, Any]:
     if job_root.is_symlink():
         raise ConsistencyError("Collection job root cannot be a symbolic link")
     paths = [root / relative for relative in _REQUIRED]
+    provenance = root / "selection-provenance.json"
+    if provenance.exists():
+        paths.append(provenance)
     paths.extend(_aggregate_files(root))
     entries: list[dict[str, object]] = []
     total_bytes = 0

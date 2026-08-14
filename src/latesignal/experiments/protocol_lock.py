@@ -183,6 +183,57 @@ def _environment(repository: Path) -> dict[str, object]:
     }
 
 
+def _selection_execution(
+    selection_path: Path,
+    *,
+    git_commit: str,
+    selection_file_sha256: str,
+    protocol_sha256: str,
+    data_manifest_sha256: str,
+    final_config_file_sha256: str,
+    selected_steps_per_credit: int,
+    environment_sha256: str,
+    target_gpu_uuid: str | None,
+) -> dict[str, object]:
+    provenance_path = selection_path.parent.parent / "selection-provenance.json"
+    if not provenance_path.exists():
+        return {
+            "mode": "same_commit",
+            "git_commit": git_commit,
+            "selection_file_sha256": selection_file_sha256,
+        }
+    if provenance_path.is_symlink() or not provenance_path.is_file():
+        raise ConsistencyError("Selection provenance is redirected or malformed")
+    provenance = read_json(provenance_path)
+    expected = provenance.get("provenance_sha256")
+    unsigned = {key: value for key, value in provenance.items() if key != "provenance_sha256"}
+    if (
+        not isinstance(expected, str)
+        or hashlib.sha256(canonical_json_bytes(unsigned)).hexdigest() != expected
+        or provenance.get("version") != 1
+        or provenance.get("status") != "verified_cross_commit_reuse"
+        or provenance.get("target_commit") != git_commit
+        or provenance.get("selection_file_sha256") != selection_file_sha256
+        or provenance.get("source_protocol_sha256") != protocol_sha256
+        or provenance.get("source_data_manifest_sha256") != data_manifest_sha256
+        or provenance.get("source_final_config_file_sha256") != final_config_file_sha256
+        or provenance.get("source_steps_per_credit") != selected_steps_per_credit
+        or provenance.get("source_environment_sha256") != environment_sha256
+        or provenance.get("source_gpu_uuid") != target_gpu_uuid
+        or provenance.get("target_gpu_uuid") != target_gpu_uuid
+        or provenance.get("source_exit_stage") != "cuda_resume_qualification"
+        or provenance.get("source_exit_code") != 5
+        or provenance.get("source_error") != "Scheduler decisions must occur on daily boundaries"
+        or provenance.get("reused_paths")
+        != ["selection/manifest.json", "selection/selection-results.json"]
+    ):
+        raise ConsistencyError("Selection provenance does not authorize this protocol lock")
+    return {
+        "mode": "verified_cross_commit_reuse",
+        "provenance": provenance,
+    }
+
+
 def create_protocol_lock(
     final: FinalExperimentConfig,
     protocol: ProtocolDefinition,
@@ -248,6 +299,10 @@ def create_protocol_lock(
     selection_file_sha256, _ = sha256_file(selection_path)
     feasibility_sha256 = hashlib.sha256(canonical_json_bytes(feasibility)).hexdigest()
     environment_sha256 = hashlib.sha256(canonical_json_bytes(environment)).hexdigest()
+    execution_context = feasibility.get("execution_context")
+    target_gpu_uuid = (
+        execution_context.get("device_uuid") if isinstance(execution_context, dict) else None
+    )
     payload: dict[str, Any] = {
         "lock_version": 1,
         "created_at": datetime.now(UTC).isoformat(),
@@ -257,6 +312,17 @@ def create_protocol_lock(
         "protocol_sha256": protocol_sha256,
         "final_config_file_sha256": final_config_file_sha256,
         "selection_file_sha256": selection_file_sha256,
+        "selection_execution": _selection_execution(
+            selection_path,
+            git_commit=str(git["commit"]),
+            selection_file_sha256=selection_file_sha256,
+            protocol_sha256=protocol_sha256,
+            data_manifest_sha256=str(data["manifest_sha256"]),
+            final_config_file_sha256=final_config_file_sha256,
+            selected_steps_per_credit=int(feasibility["selected_steps_per_credit"]),
+            environment_sha256=environment_sha256,
+            target_gpu_uuid=target_gpu_uuid if isinstance(target_gpu_uuid, str) else None,
+        ),
         "feasibility_sha256": feasibility_sha256,
         "environment_sha256": environment_sha256,
         "data": data,

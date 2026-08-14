@@ -98,6 +98,18 @@ def test_fixed_schedulers_spend_exactly_once_per_window(policy: str, expected_fi
     assert len(scheduler.monitoring_log) == 59
 
 
+@pytest.mark.parametrize("policy", ["early", "midpoint", "deadline"])
+def test_fixed_schedulers_use_dataset_relative_daily_boundaries(policy: str) -> None:
+    origin = 123
+    scheduler = FixedWindowScheduler(build_credit_windows(origin=origin), policy=policy)
+
+    for day in range(31, 90):
+        scheduler.decide(origin + day * DAY, _empty_evidence(day))
+
+    scheduler.assert_complete()
+    assert len(scheduler.monitoring_log) == 59
+
+
 def test_calibration_residual_matches_hand_calculation() -> None:
     examples = tuple(_cohort(0, shifted=True) + _cohort(1, shifted=True))
 

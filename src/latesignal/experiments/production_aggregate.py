@@ -670,6 +670,25 @@ def _aggregate_report(
             "under the predeclared criterion."
         )
     )
+    limitations = [
+        "This is one public sponsored-search dataset and may not generalize to other "
+        "traffic or attribution policies.",
+        "Mature calibration evidence is delayed by the 30-day attribution window and "
+        "is not real-time drift detection.",
+        "Offline references use a different representation and optimizer and are "
+        "excluded from the equal-compute ranking.",
+        "Deterministic controls reduce software variance but do not prove bitwise "
+        "portability across accelerator stacks.",
+    ]
+    if (
+        isinstance(lock.get("selection_execution"), dict)
+        and lock["selection_execution"].get("mode") == "verified_cross_commit_reuse"
+    ):
+        limitations.append(
+            "Selection evidence came from the immediately preceding clean commit; hashed "
+            "provenance records that the intervening change fixed dataset-relative scheduler "
+            "boundary validation after selection and before final scoring."
+        )
     report = ReportInput.model_validate(
         {
             "version": 1,
@@ -698,16 +717,7 @@ def _aggregate_report(
             "intermediate_budget": intermediate_rows,
             "compute": compute_rows,
             "leakage_audit": quality_controls,
-            "limitations": [
-                "This is one public sponsored-search dataset and may not generalize to other "
-                "traffic or attribution policies.",
-                "Mature calibration evidence is delayed by the 30-day attribution window and "
-                "is not real-time drift detection.",
-                "Offline references use a different representation and optimizer and are "
-                "excluded from the equal-compute ranking.",
-                "Deterministic controls reduce software variance but do not prove bitwise "
-                "portability across accelerator stacks.",
-            ],
+            "limitations": limitations,
             "reproduction_commands": [
                 "bash tools/gpu-study.sh submit cuda-pm 1",
                 "bash tools/gpu-study.sh status cuda-pm",

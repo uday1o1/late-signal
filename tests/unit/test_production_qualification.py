@@ -20,11 +20,14 @@ class _RealSchemaFeatures:
     def __init__(self) -> None:
         per_day = 8
         rows = 91 * per_day
+        origin = 123
         self.prepared_manifest_sha256 = "4" * 64
         self.feature_policy_sha256 = "5" * 64
         self.click_days = np.repeat(np.arange(91, dtype=np.int16), per_day)
-        self.click_times = self.click_days.astype(np.float64) * SECONDS_PER_DAY + np.tile(
-            np.arange(per_day, dtype=np.float64), 91
+        self.click_times = (
+            origin
+            + self.click_days.astype(np.float64) * SECONDS_PER_DAY
+            + np.tile(np.arange(per_day, dtype=np.float64), 91)
         )
         self.click_ids = np.asarray(
             [(index + 1).to_bytes(32, "big") for index in range(rows)],

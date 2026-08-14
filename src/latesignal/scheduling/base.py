@@ -48,7 +48,8 @@ class WindowedScheduler:
         return len(self._spent_windows)
 
     def _window_at(self, simulator_time: int) -> CreditWindow:
-        if simulator_time % self.day_seconds:
+        first_boundary = self.windows[0].start_time
+        if (simulator_time - first_boundary) % self.day_seconds:
             raise ConsistencyError("Scheduler decisions must occur on daily boundaries")
         if self._last_decision_time is not None and simulator_time <= self._last_decision_time:
             raise ConsistencyError("Scheduler decision time must increase strictly")

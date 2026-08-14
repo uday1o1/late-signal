@@ -10,6 +10,7 @@ usage() {
   cat <<'EOF'
 Usage:
   bash tools/gpu-study.sh submit SSH_HOST [GPU_INDEX]
+  bash tools/gpu-study.sh resume SSH_HOST GPU_INDEX SOURCE_COMMIT
   bash tools/gpu-study.sh status SSH_HOST
   bash tools/gpu-study.sh logs SSH_HOST
   bash tools/gpu-study.sh follow SSH_HOST
@@ -20,6 +21,10 @@ Submit the exact current origin/main revision as one detached, resumable tmux
 one-shot job on a trusted SSH-accessible NVIDIA GPU host. After submit confirms the
 started receipt, the Mac can disconnect, sleep, or shut down without stopping
 the remote job.
+
+Resume reuses only sealed selection evidence from a prior clean commit whose
+job stopped at the pre-scoring CUDA qualification gate. It binds explicit
+cross-commit provenance into the new protocol lock and carries prior GPU time.
 
 The same submit command resumes incomplete commit-scoped evidence. It refuses a
 duplicate active job, a completed job, a dirty checkout, a revision that is not
@@ -58,6 +63,12 @@ case "$ACTION" in
       exit 2
     }
     ;;
+  resume)
+    (( $# == 3 )) || {
+      usage >&2
+      exit 2
+    }
+    ;;
   status|logs|follow|attach|collect)
     (( $# == 1 )) || {
       usage >&2
@@ -72,8 +83,14 @@ esac
 
 readonly SSH_HOST="$1"
 readonly GPU_INDEX="${2:-0}"
+readonly RESUME_COMMIT="${3:--}"
 [[ "$SSH_HOST" =~ ^[A-Za-z0-9._@-]+$ ]] || die "SSH_HOST contains unsupported characters"
 [[ "$GPU_INDEX" =~ ^[0-9]+$ ]] || die "GPU_INDEX must be a non-negative integer"
+if [[ "$ACTION" == "resume" ]]; then
+  [[ "$RESUME_COMMIT" =~ ^[0-9a-f]{40}$ ]] || die "SOURCE_COMMIT must be a full Git hash"
+else
+  [[ "$RESUME_COMMIT" == "-" ]] || die "unexpected resume commit"
+fi
 
 for command_name in git rsync ssh; do
   require_command "$command_name"
@@ -97,6 +114,9 @@ remote_home="$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$SSH_HOST" 'printf %s 
 readonly REMOTE_GIT_ROOT="$remote_home/late-signal"
 readonly REMOTE_ROOT="$remote_home/late-signal-worktrees/$COMMIT_SHORT"
 readonly REMOTE_JOB="$REMOTE_ROOT/runs/one-shot/$COMMIT_SHORT"
+readonly RESUME_SHORT="${RESUME_COMMIT:0:12}"
+readonly RESUME_ROOT="$remote_home/late-signal-worktrees/$RESUME_SHORT"
+readonly RESUME_JOB="$RESUME_ROOT/runs/one-shot/$RESUME_SHORT"
 
 case "$ACTION" in
   status)
@@ -213,9 +233,12 @@ for item in files:
         raise SystemExit("remote collection path is unsafe")
     value = path.as_posix()
     if value not in required and (
-        not value.startswith("final/aggregate/")
-        or path.suffix not in allowed_suffixes
-        or any(token in value.lower() for token in forbidden)
+        value != "selection-provenance.json"
+        and (
+            not value.startswith("final/aggregate/")
+            or path.suffix not in allowed_suffixes
+            or any(token in value.lower() for token in forbidden)
+        )
     ):
         raise SystemExit("remote collection path is outside the aggregate-only allowlist")
     if value in seen:
@@ -288,7 +311,9 @@ setup_output="$(ssh "$SSH_HOST" bash -s -- \
   "$GPU_INDEX" \
   "$MIN_DISK_GB" \
   "$MIN_MEMORY_GB" \
-  "$MIN_VRAM_MIB" <<'REMOTE_SETUP'
+  "$MIN_VRAM_MIB" \
+  "$RESUME_COMMIT" \
+  "$RESUME_JOB" <<'REMOTE_SETUP'
 set -Eeuo pipefail
 remote_git_root="$1"
 remote_root="$2"
@@ -300,6 +325,8 @@ gpu_index="$7"
 min_disk_gb="$8"
 min_memory_gb="$9"
 min_vram_mib="${10}"
+resume_commit="${11}"
+resume_job="${12}"
 
 for command_name in git tmux flock setsid nvidia-smi python3 df awk sed timeout; do
   command -v "$command_name" >/dev/null 2>&1 || {
@@ -394,12 +421,55 @@ compute_pids="$(nvidia-smi --id="$gpu_index" --query-compute-apps=pid \
   exit 1
 }
 mkdir -p "$remote_root/data/processed" "$remote_job"
+prior_gpu_seconds=0
+if [[ "$resume_commit" != "-" ]]; then
+  [[ "$resume_commit" =~ ^[0-9a-f]{40}$ ]] || {
+    printf 'error: resume source commit is malformed\n' >&2
+    exit 1
+  }
+  [[ "$resume_job" =~ ^/[A-Za-z0-9._/-]+$ && "$resume_job" != *..* ]] || {
+    printf 'error: resume source job path is unsafe\n' >&2
+    exit 1
+  }
+  [[ "$resume_commit" != "$expected_head" ]] || {
+    printf 'error: cross-commit resume source equals the target commit\n' >&2
+    exit 1
+  }
+  for source_path in \
+    "$resume_job" \
+    "$resume_job/state.json" \
+    "$resume_job/exit.json" \
+    "$resume_job/heartbeat.json" \
+    "$resume_job/job.log" \
+    "$resume_job/selection" \
+    "$resume_job/selection/manifest.json" \
+    "$resume_job/selection/selection-results.json" \
+    "$resume_job/protocol-lock.json"; do
+    [[ -e "$source_path" && ! -L "$source_path" ]] || {
+      printf 'error: resume source evidence is missing or redirected: %s\n' "$source_path" >&2
+      exit 1
+    }
+  done
+  prior_gpu_seconds="$(
+    python3 "$remote_root/tools/prepare-selection-resume.py" \
+      prepare "$resume_job" "$remote_job" "$resume_commit" "$expected_head" "$gpu_uuid"
+  )"
+  [[ "$prior_gpu_seconds" =~ ^[0-9]+$ ]] || {
+    printf 'error: resume GPU accounting is malformed\n' >&2
+    exit 1
+  }
+fi
 printf 'GPU_UUID=%s\n' "$gpu_uuid"
+printf 'PRIOR_GPU_SECONDS=%s\n' "$prior_gpu_seconds"
 REMOTE_SETUP
 )"
 printf '%s\n' "$setup_output"
 gpu_uuid="$(printf '%s\n' "$setup_output" | sed -n 's/^GPU_UUID=//p' | tail -n 1)"
+prior_gpu_seconds="$(
+  printf '%s\n' "$setup_output" | sed -n 's/^PRIOR_GPU_SECONDS=//p' | tail -n 1
+)"
 [[ "$gpu_uuid" =~ ^GPU-[A-Za-z0-9-]+$ ]] || die "remote setup did not return a stable GPU UUID"
+[[ "$prior_gpu_seconds" =~ ^[0-9]+$ ]] || die "remote setup did not return GPU accounting"
 
 printf 'Synchronizing only the verified prepared dataset...\n'
 rsync --archive --checksum --human-readable --partial --progress \
@@ -408,7 +478,7 @@ rsync --archive --checksum --human-readable --partial --progress \
 printf 'Submitting detached tmux session %s...\n' "$SESSION_NAME"
 ssh "$SSH_HOST" bash "$REMOTE_ROOT/tools/start-gpu-study-remote.sh" \
   "$REMOTE_ROOT" "$REMOTE_JOB" "$gpu_uuid" "$LOCAL_HEAD" "$SESSION_NAME" \
-  "$LAUNCH_ID"
+  "$LAUNCH_ID" "$prior_gpu_seconds"
 
 printf '\nRemote one-shot study started successfully.\n'
 printf 'The Mac may now disconnect, sleep, or shut down.\n'

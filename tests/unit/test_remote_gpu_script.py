@@ -1,7 +1,10 @@
 """Contract tests for the bounded remote GPU feasibility helper."""
 
+import hashlib
+import json
 import os
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -11,6 +14,7 @@ SCRIPT = Path("tools/run-gpu-feasibility.sh").resolve()
 STUDY_SCRIPT = Path("tools/gpu-study.sh").resolve()
 REMOTE_STARTER = Path("tools/start-gpu-study-remote.sh").resolve()
 REMOTE_DRIVER = Path("tools/run-gpu-study-remote.sh").resolve()
+RESUME_HELPER = Path("tools/prepare-selection-resume.py").resolve()
 
 
 def test_remote_gpu_script_help_is_safe_and_bounded() -> None:
@@ -69,6 +73,7 @@ def test_one_shot_gpu_scripts_are_valid_and_explain_detached_operation() -> None
     assert "detached" in help_text
     assert "Mac can disconnect" in help_text
     assert "bash tools/gpu-study.sh submit cuda-pm 1" in help_text
+    assert "bash tools/gpu-study.sh resume SSH_HOST GPU_INDEX SOURCE_COMMIT" in help_text
 
 
 def test_one_shot_remote_driver_orders_every_hard_gate_before_scoring() -> None:
@@ -105,6 +110,10 @@ def test_one_shot_remote_driver_orders_every_hard_gate_before_scoring() -> None:
     assert '"$UV_BIN" run latesignal final qualify' in source
     assert '"$UV_BIN" run latesignal final run' in source
     assert source.index("final qualify") < source.index("final run")
+    selection_function = source[source.index("run_selection()") : source.index("lock_protocol()")]
+    assert 'verify "$JOB_ROOT" "$EXPECTED_COMMIT"' in selection_function
+    assert selection_function.index('verify "$JOB_ROOT"') < selection_function.index("return")
+    assert selection_function.index("return") < selection_function.index("selection run")
 
 
 def test_one_shot_launcher_never_transfers_or_collects_restricted_rows() -> None:
@@ -123,6 +132,199 @@ def test_one_shot_launcher_never_transfers_or_collects_restricted_rows() -> None
     assert "credential.helper=store" in source
     assert "cat ~/.git-credentials" not in source
     assert 'worktree add --detach "$remote_root" "$expected_head"' in source
+    resume_source = RESUME_HELPER.read_text(encoding="utf-8")
+    assert '"status": "verified_cross_commit_reuse"' in resume_source
+    assert '"selection/manifest.json"' in resume_source
+    assert '"$LAUNCH_ID" "$prior_gpu_seconds"' in source
+
+
+def test_selection_resume_helper_seals_only_the_exact_safe_failure(tmp_path: Path) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    subprocess.run(["git", "init", "-q", str(repository)], check=True)
+    subprocess.run(["git", "-C", str(repository), "config", "user.name", "Test"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repository), "config", "user.email", "test@example.invalid"],
+        check=True,
+    )
+    base_path = repository / "src" / "latesignal" / "scheduling" / "base.py"
+    base_path.parent.mkdir(parents=True)
+    base_path.write_text(
+        """class WindowedScheduler:
+    def _window_at(self, simulator_time: int) -> CreditWindow:
+        if simulator_time % self.day_seconds:
+            raise ConsistencyError("Scheduler decisions must occur on daily boundaries")
+""",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "-C", str(repository), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(repository), "commit", "-qm", "source"], check=True)
+    source_commit = subprocess.run(
+        ["git", "-C", str(repository), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    base_path.write_text(
+        """class WindowedScheduler:
+    def _window_at(self, simulator_time: int) -> CreditWindow:
+        first_boundary = self.windows[0].start_time
+        if (simulator_time - first_boundary) % self.day_seconds:
+            raise ConsistencyError("Scheduler decisions must occur on daily boundaries")
+""",
+        encoding="utf-8",
+    )
+    allowed_additions = {
+        "results/published/synthetic-reproduction.json",
+        "src/latesignal/experiments/collection.py",
+        "src/latesignal/experiments/production_aggregate.py",
+        "src/latesignal/experiments/protocol_lock.py",
+        "tests/unit/test_collection.py",
+        "tests/unit/test_production_qualification.py",
+        "tests/unit/test_protocol_lock_runtime.py",
+        "tests/unit/test_remote_gpu_script.py",
+        "tests/unit/test_schedulers.py",
+        "tools/gpu-study.sh",
+        "tools/prepare-selection-resume.py",
+        "tools/run-gpu-study-remote.sh",
+        "tools/start-gpu-study-remote.sh",
+    }
+    for relative in allowed_additions:
+        path = repository / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"target fixture: {relative}\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repository), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(repository), "commit", "-qm", "target"], check=True)
+    target_commit = subprocess.run(
+        ["git", "-C", str(repository), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    source = tmp_path / "source"
+    target = repository / "runs" / "one-shot" / target_commit[:12]
+    selection_root = source / "selection"
+    selection_root.mkdir(parents=True)
+    target.mkdir(parents=True)
+
+    selection = {"version": 1, "protocol_sha256": "3" * 64}
+    selection_bytes = json.dumps(selection, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+    (selection_root / "selection-results.json").write_bytes(selection_bytes)
+    selection_manifest: dict[str, object] = {
+        "version": 1,
+        "status": "complete",
+        "candidate_counts": {"model": 36, "delayed": 8, "sampler": 6, "total": 50},
+        "selection_results_sha256": hashlib.sha256(
+            json.dumps(selection, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest(),
+    }
+    selection_manifest["manifest_sha256"] = hashlib.sha256(
+        json.dumps(selection_manifest, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    (selection_root / "manifest.json").write_text(
+        json.dumps(selection_manifest, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    protocol_lock: dict[str, object] = {
+        "status": "locked",
+        "publication_eligible": True,
+        "git": {"commit": source_commit, "dirty": False},
+        "protocol_sha256": "3" * 64,
+        "data": {"manifest_sha256": "4" * 64},
+        "final_config_file_sha256": "5" * 64,
+        "environment_sha256": "6" * 64,
+        "selected_steps_per_credit": 100,
+        "selection_file_sha256": hashlib.sha256(selection_bytes).hexdigest(),
+    }
+    protocol_lock["lock_sha256"] = hashlib.sha256(
+        json.dumps(protocol_lock, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    (source / "protocol-lock.json").write_text(
+        json.dumps(protocol_lock, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    launch_id = "source-launch"
+    common = {
+        "status": "failed",
+        "stage": "cuda_resume_qualification",
+        "commit": source_commit,
+        "launch_id": launch_id,
+        "gpu_uuid": "GPU-test",
+        "exit_code": 5,
+    }
+    (source / "state.json").write_text(json.dumps(common) + "\n", encoding="utf-8")
+    (source / "exit.json").write_text(
+        json.dumps({**common, "finished_at": "2026-08-14T00:02:00Z"}) + "\n",
+        encoding="utf-8",
+    )
+    (source / "heartbeat.json").write_text(
+        json.dumps(
+            {
+                "commit": source_commit,
+                "launch_id": launch_id,
+                "gpu_uuid": "GPU-test",
+                "gpu_active_seconds": 100,
+                "updated_at": "2026-08-14T00:01:40Z",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (source / "job.log").write_text(
+        '{"message":"Scheduler decisions must occur on daily boundaries"}\n',
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(RESUME_HELPER),
+            "prepare",
+            str(source),
+            str(target),
+            source_commit,
+            target_commit,
+            "GPU-test",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "120"
+    provenance = json.loads((target / "selection-provenance.json").read_text(encoding="utf-8"))
+    assert provenance["prior_gpu_seconds"] == 120
+    assert provenance["source_steps_per_credit"] == 100
+    assert provenance["reused_paths"] == [
+        "selection/manifest.json",
+        "selection/selection-results.json",
+    ]
+    assert {path.name for path in (target / "selection").iterdir()} == {
+        "manifest.json",
+        "selection-results.json",
+    }
+
+    (selection_root / "selection-results.json").write_text("{}\n", encoding="utf-8")
+    changed_target = repository / "runs" / "one-shot" / "changed-target"
+    changed_target.mkdir(parents=True)
+    changed = subprocess.run(
+        [
+            sys.executable,
+            str(RESUME_HELPER),
+            "prepare",
+            str(source),
+            str(changed_target),
+            source_commit,
+            target_commit,
+            "GPU-test",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert changed.returncode != 0
+    assert "selection evidence changed" in changed.stderr
 
 
 def _write_executable(path: Path, content: str) -> None:
@@ -255,7 +457,7 @@ value="$((value + 1))"
 printf '%s\\n' "$value" >"$counter"
 case "$value" in
   1) printf '/home/test' ;;
-  2) printf 'GPU_UUID=GPU-fake-stable\\n' ;;
+  2) printf 'GPU_UUID=GPU-fake-stable\\nPRIOR_GPU_SECONDS=0\\n' ;;
   3) exit 0 ;;
   *) printf 'unexpected fake ssh call %s\\n' "$value" >&2; exit 9 ;;
 esac
