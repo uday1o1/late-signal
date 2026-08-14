@@ -6,7 +6,7 @@ from pathlib import Path
 from latesignal.contracts.protocol import load_final_protocol
 
 
-def test_external_actions_are_commit_pinned_and_cpu_ci_never_fetches_data() -> None:
+def test_external_actions_are_commit_pinned_and_cpu_ci_uses_public_gates() -> None:
     workflow_root = Path(".github/workflows")
     workflows = [path.read_text(encoding="utf-8") for path in sorted(workflow_root.glob("*.yml"))]
     uses = [match for text in workflows for match in re.findall(r"uses:\s+[^@\s]+@([^\s#]+)", text)]
@@ -21,6 +21,7 @@ def test_external_actions_are_commit_pinned_and_cpu_ci_never_fetches_data() -> N
     assert "uv run ruff format --check ." in cpu
     assert "uv run mypy" in cpu
     assert "uv run pytest" in cpu
+    assert "uv run latesignal audit --json" in cpu
 
 
 def test_gpu_workflow_is_manual_bounded_and_uses_an_exact_cleanup_target() -> None:

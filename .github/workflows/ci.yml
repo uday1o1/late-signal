@@ -62,12 +62,5 @@ jobs:
       - name: Run CPU tests
         run: uv run pytest
 
-      - name: Guard restricted and generated roots
-        shell: bash
-        run: |
-          tracked=$(git ls-files data runs checkpoints artifacts reports)
-          if [[ -n "$tracked" ]]; then
-            echo "Restricted or generated paths are tracked:"
-            echo "$tracked"
-            exit 1
-          fi
+      - name: Audit release hygiene
+        run: uv run latesignal audit --json
