@@ -7,7 +7,9 @@ import pyarrow.parquet as pq  # type: ignore[import-untyped]
 import pytest
 import torch
 
+from latesignal.errors import ConsistencyError
 from latesignal.experiments.checkpoint import CheckpointIdentity
+from latesignal.experiments.final_evaluation import evaluate_final_run
 from latesignal.experiments.production_final import ProductionFinalPlan
 from latesignal.experiments.production_final_controller import ProductionFinalController
 from latesignal.features.store import FeatureTensorBatch
@@ -30,6 +32,14 @@ class _Features:
             dtype="V32",
         )
         self.values = np.arange(self.click_days.size, dtype=np.int64) % 8
+        history = np.arange(self.click_days.size, dtype=np.int64) % 12
+        self.prior_user_clicks = history
+        self.prior_product_clicks = history.copy()
+        self.cold_user = history == 0
+        self.cold_product = history == 0
+        self.product_price = np.arange(self.click_days.size, dtype=np.float64) + 1.0
+        self.device_types = ("desktop", "mobile")
+        self.device_type_codes = (np.arange(self.click_days.size) % 2).astype(np.uint16)
 
     @property
     def categorical_specs(self) -> dict[str, CategoricalSpec]:
@@ -183,6 +193,42 @@ def test_final_controller_seals_prequential_and_intermediate_evidence(tmp_path: 
     assert len({int(item["model_version"]) for item in primary}) > 1
     ordered = {item["ordered_id_sha256"] for item in manifest["intermediate_predictions"]}
     assert len(ordered) == 1
+
+
+def test_final_evaluator_verifies_seals_before_truth_join_and_compacts_primary(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "run"
+    features = _Features()
+    plan = _plan()
+    monitoring = np.zeros(features.click_days.size, dtype=np.bool_)
+    monitoring[::2] = True
+    controller = ProductionFinalController(
+        plan=plan,
+        features=features,
+        truth=_truth(features),
+        monitoring_mask=monitoring,
+        output_root=root,
+        checkpoint_identity=_checkpoint_identity(plan),
+    )
+    controller.run()
+
+    evaluation = evaluate_final_run(root, truth=_truth(features), features=features)
+    repeated = evaluate_final_run(root, truth=_truth(features), features=features)
+
+    assert evaluation == repeated
+    assert evaluation["truth_joined"] is True
+    assert evaluation["primary_mode"] == "prequential"
+    assert evaluation["rows"] == 50
+    assert len(evaluation["intermediate"]) == 4
+    compact = np.load(root / "compact" / "primary-probabilities.npy", allow_pickle=False)
+    assert compact.dtype == np.float32
+    assert compact.shape == (50,)
+
+    first_part = next((root / "predictions" / "primary").glob("part-*.parquet"))
+    first_part.write_bytes(b"forged")
+    with pytest.raises(ConsistencyError):
+        evaluate_final_run(root, truth=_truth(features), features=features)
 
 
 def test_final_controller_resume_matches_at_every_checkpoint_boundary(tmp_path: Path) -> None:
