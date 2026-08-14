@@ -12,7 +12,7 @@ import subprocess
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -101,7 +101,7 @@ def _exclusive_job_lock(job: Path) -> Iterator[None]:
 
 
 def verify_driver_diff(repository: Path, execution_commit: str, driver_commit: str) -> list[str]:
-    """Require one merge-free, tooling-only recovery commit."""
+    """Require one or two linear, tooling-only recovery commits."""
 
     if (
         not re.fullmatch(r"[0-9a-f]{40}", execution_commit)
@@ -111,9 +111,23 @@ def verify_driver_diff(repository: Path, execution_commit: str, driver_commit: s
         or _git(repository, "status", "--porcelain", "--untracked-files=all")
     ):
         raise ValueError("final recovery driver repository identity is invalid")
-    fields = _git(repository, "rev-list", "--parents", "-n", "1", driver_commit).split()
-    if len(fields) != 2 or fields[1] != execution_commit:
-        raise ValueError("final recovery driver must be the direct non-merge child of execution")
+    revisions = _git(
+        repository,
+        "rev-list",
+        "--reverse",
+        "--ancestry-path",
+        f"{execution_commit}..{driver_commit}",
+    ).splitlines()
+    previous = execution_commit
+    if not 1 <= len(revisions) <= 2:
+        raise ValueError("final recovery driver must be a bounded linear child of execution")
+    for revision in revisions:
+        fields = _git(repository, "rev-list", "--parents", "-n", "1", revision).split()
+        if len(fields) != 2 or fields[0] != revision or fields[1] != previous:
+            raise ValueError("final recovery driver chain must be linear and merge-free")
+        previous = revision
+    if previous != driver_commit:
+        raise ValueError("final recovery driver chain does not reach the reviewed driver")
     changed = set(
         _git(repository, "diff", "--name-only", execution_commit, driver_commit).splitlines()
     )
@@ -128,7 +142,7 @@ def _timestamp(value: object, description: str) -> datetime:
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if parsed.tzinfo is None:
         raise ValueError(f"{description} timestamp is not timezone-aware")
-    return parsed.astimezone(UTC)
+    return parsed.astimezone(timezone.utc)  # noqa: UP017 - standalone Python 3.9 support
 
 
 def _verify_failed_receipts(
@@ -412,7 +426,9 @@ def _retry_interruption_evidence(
             or failure_launch == recovery_launch_id
         ):
             raise ValueError("sealed recovery interruption is not safely classifiable")
-        observed_at = datetime.now(UTC)
+        observed_at = datetime.now(
+            timezone.utc  # noqa: UP017 - standalone Python 3.9 support
+        )
         if heartbeat is not None and heartbeat_common == common:
             heartbeat_gpu_seconds = heartbeat.get("gpu_active_seconds")
             working_kib = heartbeat.get("working_kib")

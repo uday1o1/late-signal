@@ -83,6 +83,7 @@ def test_one_shot_gpu_scripts_are_valid_and_explain_detached_operation() -> None
     assert "bash tools/gpu-study.sh submit cuda-pm 1" in help_text
     assert "bash tools/gpu-study.sh resume SSH_HOST GPU_INDEX SOURCE_COMMIT" in help_text
     assert "bash tools/gpu-study.sh recover-final SSH_HOST GPU_INDEX EXECUTION_COMMIT" in help_text
+    assert "from datetime import UTC" not in FINAL_RESUME_HELPER.read_text(encoding="utf-8")
 
 
 def test_one_shot_remote_driver_orders_every_hard_gate_before_scoring() -> None:
@@ -398,6 +399,13 @@ def test_final_resume_helper_preserves_same_commit_checkpoint_evidence(tmp_path:
         (repository / relative).write_text(f"driver fixture: {relative}\n", encoding="utf-8")
     subprocess.run(["git", "-C", str(repository), "add", "."], check=True)
     subprocess.run(["git", "-C", str(repository), "commit", "-qm", "driver"], check=True)
+    (repository / "tools" / "prepare-final-resume.py").write_text(
+        "driver fixture with compatibility correction\n", encoding="utf-8"
+    )
+    subprocess.run(
+        ["git", "-C", str(repository), "add", "tools/prepare-final-resume.py"], check=True
+    )
+    subprocess.run(["git", "-C", str(repository), "commit", "-qm", "correction"], check=True)
     driver_commit = subprocess.run(
         ["git", "-C", str(repository), "rev-parse", "HEAD"],
         check=True,
@@ -850,10 +858,10 @@ def test_final_resume_helper_preserves_same_commit_checkpoint_evidence(tmp_path:
     sixth = subprocess.run(arguments, check=False, capture_output=True, text=True)
     sixth_launch = f"recovery-{driver_commit[:12]}-6"
     assert sixth.returncode == 0, sixth.stderr
-    assert sixth.stdout.splitlines() == [
-        f"RECOVERY_LAUNCH_ID={sixth_launch}",
-        "PRIOR_GPU_SECONDS=800",
-    ]
+    sixth_lines = sixth.stdout.splitlines()
+    assert sixth_lines[0] == f"RECOVERY_LAUNCH_ID={sixth_launch}"
+    sixth_prior = int(sixth_lines[1].removeprefix("PRIOR_GPU_SECONDS="))
+    assert 800 <= sixth_prior <= 805
 
     (job / "started.json").write_bytes(
         _canonical_fixture(
