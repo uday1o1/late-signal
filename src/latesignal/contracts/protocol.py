@@ -167,6 +167,7 @@ class PilotConfig(StrictModel):
     assumed_runtime_feature_cache_gb: float = Field(gt=0)
     temporary_margin_gb: float = Field(gt=0)
     assumed_host_memory_gb: float = Field(gt=0)
+    min_checkpoint_generation_seconds: float | None = Field(default=None, gt=0)
 
 
 class ResourceCaps(StrictModel):

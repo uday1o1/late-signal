@@ -1733,7 +1733,7 @@ if [[ "$*" == *"protocol estimate"* ]]; then
     if [[ "$1" == "--out" ]]; then
       shift
       printf '%s%s%s%s%s\\n' \\
-        '{"feasibility_model_version":2,"status":"passed","blockers":[],' \\
+        '{"feasibility_model_version":3,"status":"passed","blockers":[],' \\
         '"matrix":{"total_runs":89},"selected_steps_per_credit":500,' \\
         '"projections":[{"steps_per_credit":500,"fits_caps":true,' \\
         '"cap_checks":{"runs":true,"compute_hours":true,' \\

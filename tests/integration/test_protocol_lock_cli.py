@@ -151,7 +151,7 @@ def _feasibility(protocol_sha256: str, matrix: dict[str, int]) -> dict[str, Any]
         "retained_disk": True,
     }
     return {
-        "feasibility_model_version": 2,
+        "feasibility_model_version": 3,
         "status": "passed",
         "protocol_sha256": protocol_sha256,
         "blockers": [],

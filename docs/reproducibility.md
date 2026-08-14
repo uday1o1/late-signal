@@ -95,13 +95,16 @@ Run the bounded estimator on the intended CUDA machine with prepared data availa
 
 ```bash
 uv run latesignal protocol validate configs/experiments/final.yaml \
-  --out results/feasibility.json \
+  --out runs/feasibility/final.json \
   --json
 ```
 
 The command must exit successfully and choose the largest allowed steps-per-credit value that fits every cap.
 It does not use a quality metric for that choice.
-The projection includes shared initialization, method-specific core training, worst-case ES-DFM auxiliary training, all primary and intermediate prediction passes, checkpoint writes, rolling ES-DFM checkpoint state, pending stage ledgers, and aggregate retention.
+The projection includes shared initialization, method-specific core training, worst-case ES-DFM auxiliary training, all primary and intermediate prediction passes, production state cloning, durable rolling checkpoint writes and reload verification, immutable snapshot writes, every checkpoint-time and terminal snapshot verification, pending stage ledgers, and aggregate retention.
+The estimator benchmarks checkpoint artifacts in a fixed ignored work root on the result filesystem and removes that root after a normal completion.
+Its ownership marker and exclusive lock make a retry recoverable without permitting deletion of foreign content.
+The machine-specific checkpoint-generation floor is part of the hashed final configuration, and the estimator uses it whenever it is more conservative than the component benchmark.
 The remote execution host receives prepared data but not the licensed archive or expanded source file, which remain on the acquisition machine.
 
 Selection runs use outcomes only for click days 25 through 34 and record every attempted candidate.
@@ -123,7 +126,7 @@ After the complete selection evidence exists, create the pre-scoring lock:
 ```bash
 uv run latesignal protocol lock configs/experiments/final.yaml \
   --selection results/selection.json \
-  --feasibility results/feasibility.json \
+  --feasibility runs/feasibility/final.json \
   --data-manifest data/processed/manifests/preparation.json \
   --out results/protocol-lock.json \
   --json

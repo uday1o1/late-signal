@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import io
 import math
+import os
 import platform
 import resource
+import shutil
 import sys
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -19,19 +24,38 @@ import pyarrow.parquet as pq  # type: ignore[import-untyped]
 import torch
 
 from latesignal.contracts.protocol import FinalExperimentConfig, ProtocolDefinition
+from latesignal.data.manifests import read_json, write_json_atomic
 from latesignal.data.schema import CATEGORICAL_CLICK_FIELDS
+from latesignal.errors import ConsistencyError
+from latesignal.experiments.checkpoint import CheckpointIdentity, RollingCheckpointStore
+from latesignal.experiments.final_snapshots import FinalSnapshotIdentity, FinalSnapshotStore
 from latesignal.features.hashing import categorical_bucket
 from latesignal.methods.losses import dfm_loss
 from latesignal.models.conversion_mlp import CategoricalSpec, ConversionMLP
 from latesignal.models.dfm import DelayedFeedbackMLP
+from latesignal.training.production import _snapshot_state
 
 BYTES_PER_GB = 1024**3
+FEASIBILITY_MODEL_VERSION = 3
 CHECKPOINT_WORKING_COPIES = 3
 COMPLETED_CHECKPOINTS_RETAINED = 0
 REPORT_BYTES_PER_RUN = 250_000
 TRAINING_WARMUP_STEPS = 3
 PROJECTION_UPPER_MULTIPLIER = 1.5
 INTERMEDIATE_BUDGET_FRACTIONS = 4
+FINAL_SNAPSHOT_WRITES_PER_RUN = 4
+STUDY_A_CHECKPOINT_SNAPSHOT_VERIFICATIONS_PER_RUN = 95
+STUDY_B_CHECKPOINT_SNAPSHOT_VERIFICATIONS_PER_RUN = 240
+TERMINAL_SNAPSHOT_VERIFICATIONS_PER_RUN = 4
+BENCHMARK_DISK_SAFETY_BYTES = BYTES_PER_GB
+_BENCHMARK_WORK_ROOT_NAME = ".latesignal-feasibility-benchmark"
+_BENCHMARK_LOCK_NAME = f"{_BENCHMARK_WORK_ROOT_NAME}.lock"
+_BENCHMARK_OWNER = {
+    "version": 1,
+    "kind": "latesignal-feasibility-benchmark",
+    "work_root_name": _BENCHMARK_WORK_ROOT_NAME,
+}
+_BENCHMARK_TOP_LEVEL_ENTRIES = frozenset({".owner.json", "rolling", "snapshots"})
 HIGH_CARDINALITY_FIELDS = frozenset(
     {
         "audience_id",
@@ -42,6 +66,133 @@ HIGH_CARDINALITY_FIELDS = frozenset(
         "user_id",
     }
 )
+
+
+def _filesystem_device(path: Path) -> int:
+    return int(os.stat(path).st_dev)
+
+
+def _fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _verified_owned_work_root(root: Path) -> None:
+    if root.is_symlink() or not root.is_dir() or root.resolve() != root:
+        raise ConsistencyError("Feasibility benchmark work root is redirected or malformed")
+    entries = {path.name for path in root.iterdir()}
+    if not entries:
+        return
+    marker = root / ".owner.json"
+    if marker.is_symlink() or not marker.is_file() or read_json(marker) != _BENCHMARK_OWNER:
+        raise ConsistencyError("Feasibility benchmark work root is not owned by this benchmark")
+    unknown = entries - _BENCHMARK_TOP_LEVEL_ENTRIES
+    if unknown:
+        raise ConsistencyError(
+            "Feasibility benchmark work root contains an unknown artifact",
+            details={"entries": sorted(unknown)},
+        )
+    for name in entries - {".owner.json"}:
+        path = root / name
+        if path.is_symlink() or not path.is_dir():
+            raise ConsistencyError("Feasibility benchmark artifact is redirected or malformed")
+
+
+def _remove_owned_work_root(root: Path, *, allow_empty_unmarked: bool) -> None:
+    if not root.exists() and not root.is_symlink():
+        return
+    _verified_owned_work_root(root)
+    if not any(root.iterdir()):
+        if not allow_empty_unmarked:
+            raise ConsistencyError("Feasibility benchmark ownership marker is missing")
+        root.rmdir()
+        _fsync_directory(root.parent)
+        return
+    shutil.rmtree(root)
+    _fsync_directory(root.parent)
+
+
+@contextmanager
+def _benchmark_workspace(
+    work_root: Path,
+    *,
+    filesystem_reference: Path,
+) -> Iterator[tuple[Path, int]]:
+    parent = work_root.parent.resolve()
+    root = parent / work_root.name
+    if root.name != _BENCHMARK_WORK_ROOT_NAME or root.parent != parent:
+        raise ConsistencyError("Feasibility benchmark work root is not the fixed owned path")
+    parent.mkdir(parents=True, exist_ok=True)
+    reference = filesystem_reference.resolve()
+    if not reference.exists():
+        raise ConsistencyError("Feasibility benchmark filesystem reference does not exist")
+    parent_device = _filesystem_device(parent)
+    reference_device = _filesystem_device(reference)
+    if parent_device != reference_device:
+        raise ConsistencyError(
+            "Feasibility benchmark work root is on a different filesystem",
+            details={
+                "work_root_device": parent_device,
+                "reference_device": reference_device,
+            },
+        )
+    lock_path = parent / _BENCHMARK_LOCK_NAME
+    if lock_path.is_symlink() or (lock_path.exists() and not lock_path.is_file()):
+        raise ConsistencyError("Feasibility benchmark lock is redirected or malformed")
+    flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(lock_path, flags, 0o600)
+    except OSError as error:
+        raise ConsistencyError("Could not open the feasibility benchmark lock") from error
+    locked = False
+    try:
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            locked = True
+        except BlockingIOError as error:
+            raise ConsistencyError("Another feasibility benchmark owns the work root") from error
+        _remove_owned_work_root(root, allow_empty_unmarked=True)
+        root.mkdir()
+        write_json_atomic(root / ".owner.json", _BENCHMARK_OWNER)
+        _fsync_directory(root)
+        _fsync_directory(parent)
+        try:
+            yield root, parent_device
+        except BaseException:
+            raise
+        else:
+            _remove_owned_work_root(root, allow_empty_unmarked=False)
+    finally:
+        if locked:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
+
+
+def _require_benchmark_disk(
+    root: Path,
+    *,
+    checkpoint_bytes: int,
+    model_state_bytes: int,
+) -> dict[str, int]:
+    required = (
+        checkpoint_bytes * 3 * CHECKPOINT_WORKING_COPIES
+        + model_state_bytes
+        + BENCHMARK_DISK_SAFETY_BYTES
+    )
+    free = int(shutil.disk_usage(root).free)
+    if free < required:
+        raise ConsistencyError(
+            "Insufficient free disk for the durable feasibility benchmark",
+            details={"required_bytes": required, "free_bytes": free},
+        )
+    return {
+        "required_bytes": required,
+        "free_bytes": free,
+        "safety_bytes": BENCHMARK_DISK_SAFETY_BYTES,
+    }
 
 
 def _synchronize(device: torch.device) -> None:
@@ -79,7 +230,12 @@ def _exposure_artifact_bytes_per_row(rows: int) -> float:
     return float(sink.getvalue().size) / rows
 
 
-def _benchmark(final: FinalExperimentConfig) -> dict[str, Any]:
+def _benchmark(
+    final: FinalExperimentConfig,
+    *,
+    work_root: Path,
+    filesystem_reference: Path,
+) -> dict[str, Any]:
     requested = final.target_device
     available = requested == "cpu" or torch.cuda.is_available()
     device = torch.device(requested if available else "cpu")
@@ -189,12 +345,107 @@ def _benchmark(final: FinalExperimentConfig) -> dict[str, Any]:
     for index in range(final.pilot.benchmark_examples):
         categorical_bucket("user_id", f"synthetic-{index}", 20260813, 2**18)
     preparation_seconds = time.perf_counter() - preparation_start
-    model_state = io.BytesIO()
-    torch.save(model.state_dict(), model_state)
-    checkpoint = io.BytesIO()
-    checkpoint_start = time.perf_counter()
-    torch.save({"model": model.state_dict(), "optimizer": optimizer.state_dict()}, checkpoint)
-    checkpoint_seconds = time.perf_counter() - checkpoint_start
+    with _benchmark_workspace(
+        work_root,
+        filesystem_reference=filesystem_reference,
+    ) as (benchmark_root, filesystem_device):
+        _synchronize(device)
+        materialization_start = time.perf_counter()
+        materialized_model = _snapshot_state(model.state_dict())
+        materialized_optimizer = _snapshot_state(optimizer.state_dict())
+        materialized_cpu_rng = torch.random.get_rng_state().clone()
+        materialized_cuda_rng = (
+            [value.clone() for value in torch.cuda.get_rng_state_all()]
+            if device.type == "cuda"
+            else []
+        )
+        _synchronize(device)
+        checkpoint_materialization_seconds = time.perf_counter() - materialization_start
+        checkpoint_state = {
+            "model": {"main": materialized_model},
+            "optimizer": {
+                "main": {
+                    "optimizer": materialized_optimizer,
+                    "metadata": {
+                        "version": 1,
+                        "seed": 17,
+                        "device_type": device.type,
+                    },
+                }
+            },
+            "rng": {
+                "main": {
+                    "cpu_rng_state": materialized_cpu_rng,
+                    "cuda_rng_state": materialized_cuda_rng,
+                }
+            },
+            "cursors": {},
+            "method": {},
+            "scheduler": {},
+            "sampler": {},
+            "monitoring": {},
+            "ledgers": {},
+            "compute": {},
+        }
+        checkpoint_buffer = io.BytesIO()
+        torch.save(checkpoint_state, checkpoint_buffer)
+        checkpoint_bytes = checkpoint_buffer.getbuffer().nbytes
+        model_state_buffer = io.BytesIO()
+        torch.save(model.state_dict(), model_state_buffer)
+        estimated_model_state_bytes = model_state_buffer.getbuffer().nbytes
+        disk_preflight = _require_benchmark_disk(
+            benchmark_root,
+            checkpoint_bytes=checkpoint_bytes,
+            model_state_bytes=estimated_model_state_bytes,
+        )
+        checkpoint_buffer.close()
+        model_state_buffer.close()
+        checkpoint_identity = CheckpointIdentity(
+            version=1,
+            phase="qualification",
+            run_id="feasibility-benchmark",
+            config_sha256="0" * 64,
+            protocol_sha256="1" * 64,
+            data_manifest_sha256="2" * 64,
+            feature_policy_sha256="3" * 64,
+            source_tree_sha256="4" * 64,
+            dependency_lock_sha256="5" * 64,
+            git_commit="6" * 40,
+            environment_sha256="7" * 64,
+            device_uuid=f"benchmark-{device.type}",
+        )
+        checkpoint_store = RollingCheckpointStore(benchmark_root / "rolling")
+        checkpoint_write_samples: list[float] = []
+        for _ in range(CHECKPOINT_WORKING_COPIES):
+            checkpoint_start = time.perf_counter()
+            checkpoint_store.write(checkpoint_identity, checkpoint_state)
+            checkpoint_write_samples.append(time.perf_counter() - checkpoint_start)
+        checkpoint_durable_write_seconds = max(checkpoint_write_samples[1:])
+        snapshot_identity = FinalSnapshotIdentity(
+            version=1,
+            run_id="feasibility-benchmark",
+            method="complete_wait",
+            seed=17,
+            config_sha256="0" * 64,
+            protocol_sha256="1" * 64,
+            protocol_lock_sha256="8" * 64,
+            budget_fraction=1.0,
+            credits_at_snapshot=4,
+            total_credits=4,
+        )
+        snapshot_store = FinalSnapshotStore(benchmark_root / "snapshots")
+        snapshot_start = time.perf_counter()
+        snapshot = snapshot_store.write(
+            snapshot_identity,
+            dict(model.state_dict()),
+            model_version=1,
+        )
+        final_snapshot_write_seconds = time.perf_counter() - snapshot_start
+        snapshot_verify_start = time.perf_counter()
+        snapshot_store.verify(snapshot_identity)
+        final_snapshot_verify_seconds = time.perf_counter() - snapshot_verify_start
+        model_state_bytes = int((snapshot.root / "model.pt").stat().st_size)
+    checkpoint_seconds = checkpoint_materialization_seconds + checkpoint_durable_write_seconds
     peak_raw = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     peak_bytes = peak_raw if sys.platform == "darwin" else peak_raw * 1024
     return {
@@ -220,9 +471,22 @@ def _benchmark(final: FinalExperimentConfig) -> dict[str, Any]:
         "synthetic_preparation_seconds": preparation_seconds,
         "synthetic_preparation_rows_per_second": final.pilot.benchmark_examples
         / preparation_seconds,
-        "checkpoint_bytes": len(checkpoint.getvalue()),
-        "model_state_bytes": len(model_state.getvalue()),
+        "checkpoint_bytes": checkpoint_bytes,
+        "model_state_bytes": model_state_bytes,
         "checkpoint_write_seconds": checkpoint_seconds,
+        "checkpoint_state_materialization_seconds": checkpoint_materialization_seconds,
+        "checkpoint_durable_write_seconds": checkpoint_durable_write_seconds,
+        "checkpoint_durable_write_samples_seconds": checkpoint_write_samples,
+        "final_snapshot_write_seconds": final_snapshot_write_seconds,
+        "final_snapshot_verify_seconds": final_snapshot_verify_seconds,
+        "checkpoint_benchmark": {
+            "mode": "production-durable-rolling-store",
+            "state_materialization_mode": "production-cpu-clone",
+            "durable_write_samples": CHECKPOINT_WORKING_COPIES,
+            "snapshot_mode": "production-immutable-store",
+            "filesystem_device": filesystem_device,
+            "disk_preflight": disk_preflight,
+        },
         "prediction_artifact_bytes_per_row": _prediction_artifact_bytes_per_row(
             final.pilot.benchmark_examples
         ),
@@ -238,7 +502,7 @@ def _benchmark(final: FinalExperimentConfig) -> dict[str, Any]:
             "torch": torch.__version__,
             "platform": platform.platform(),
             "cuda": torch.version.cuda,
-            "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
+            "gpu": torch.cuda.get_device_name(device) if device.type == "cuda" else None,
         },
     }
 
@@ -386,9 +650,16 @@ def _worst_case_workload(
         + es_final_a_runs * final_daily_checkpoint_writes
         + es_final_b_runs * final_daily_checkpoint_writes
     )
+    final_online_runs = matrix["final_study_a_runs"] + matrix["final_study_b_runs"]
+    final_snapshot_writes = final_online_runs * FINAL_SNAPSHOT_WRITES_PER_RUN
+    checkpoint_snapshot_verifications = (
+        matrix["final_study_a_runs"] * STUDY_A_CHECKPOINT_SNAPSHOT_VERIFICATIONS_PER_RUN
+        + matrix["final_study_b_runs"] * STUDY_B_CHECKPOINT_SNAPSHOT_VERIFICATIONS_PER_RUN
+    )
+    terminal_snapshot_verifications = final_online_runs * TERMINAL_SNAPSHOT_VERIFICATIONS_PER_RUN
     return {
         "selection_runs": selection_runs,
-        "final_online_runs": matrix["final_study_a_runs"] + matrix["final_study_b_runs"],
+        "final_online_runs": final_online_runs,
         "initialization_runs": matrix["online_runs"],
         "initialization_steps": (
             matrix["online_runs"] * protocol.final_training.initialization_steps
@@ -399,8 +670,17 @@ def _worst_case_workload(
         "auxiliary_steps": auxiliary_steps,
         "one_model_checkpoint_writes": one_model_checkpoint_writes,
         "three_model_checkpoint_writes": three_model_checkpoint_writes,
+        "actual_checkpoint_generations": (
+            one_model_checkpoint_writes + three_model_checkpoint_writes
+        ),
         "equivalent_single_model_checkpoint_writes": (
             one_model_checkpoint_writes + three_model_checkpoint_writes * 3
+        ),
+        "final_snapshot_writes": final_snapshot_writes,
+        "checkpoint_snapshot_verifications": checkpoint_snapshot_verifications,
+        "terminal_snapshot_verifications": terminal_snapshot_verifications,
+        "final_snapshot_verifications": (
+            checkpoint_snapshot_verifications + terminal_snapshot_verifications
         ),
     }
 
@@ -411,8 +691,24 @@ def estimate_protocol(
     *,
     config_path: Path,
     protocol_sha256: str,
+    checkpoint_work_root: Path | None = None,
+    filesystem_reference: Path | None = None,
 ) -> dict[str, Any]:
-    benchmark = _benchmark(final)
+    benchmark_parent = (
+        checkpoint_work_root.parent
+        if checkpoint_work_root is not None
+        else (Path.cwd() / "runs" / "feasibility")
+    ).resolve()
+    benchmark_parent.mkdir(parents=True, exist_ok=True)
+    resolved_work_root = benchmark_parent / _BENCHMARK_WORK_ROOT_NAME
+    resolved_reference = (
+        filesystem_reference.resolve() if filesystem_reference is not None else benchmark_parent
+    )
+    benchmark = _benchmark(
+        final,
+        work_root=resolved_work_root,
+        filesystem_reference=resolved_reference,
+    )
     real_pilot = _real_pilot(final, config_path)
     matrix = enumerate_matrix(protocol, final)
     workload = _worst_case_workload(protocol, final, matrix)
@@ -445,12 +741,16 @@ def estimate_protocol(
         + final.pilot.assumed_runtime_feature_cache_gb
         + final.pilot.temporary_margin_gb
     )
+    checkpoint_floor = final.pilot.min_checkpoint_generation_seconds
+    checkpoint_floor_available = checkpoint_floor is not None
     projections: list[dict[str, Any]] = []
     for steps_per_credit in protocol.final_training.steps_per_credit_candidates:
         optimizer_steps = matrix["total_online_credits"] * steps_per_credit
         optimizer_examples = optimizer_steps * protocol.final_training.batch_size
-        projection_valid = bool(benchmark["requested_device_available"]) and (
-            inventory_available or not final.require_real_pilot
+        projection_valid = (
+            bool(benchmark["requested_device_available"])
+            and (inventory_available or not final.require_real_pilot)
+            and (checkpoint_floor_available or not final.require_real_pilot)
         )
         base_step_seconds = float(benchmark["training_step_seconds"])
         es_step_seconds = float(benchmark["es_main_training_step_seconds"])
@@ -468,8 +768,26 @@ def estimate_protocol(
         prediction_seconds = prediction_examples / float(
             benchmark["prediction_examples_per_second"]
         )
-        checkpoint_seconds = workload["equivalent_single_model_checkpoint_writes"] * float(
-            benchmark["checkpoint_write_seconds"]
+        checkpoint_component_seconds = workload[
+            "equivalent_single_model_checkpoint_writes"
+        ] * float(benchmark["checkpoint_write_seconds"])
+        checkpoint_floor_seconds = (
+            workload["actual_checkpoint_generations"] * checkpoint_floor
+            if checkpoint_floor is not None
+            else 0.0
+        )
+        checkpoint_generation_seconds = max(
+            checkpoint_component_seconds,
+            checkpoint_floor_seconds,
+        )
+        snapshot_write_seconds = workload["final_snapshot_writes"] * float(
+            benchmark["final_snapshot_write_seconds"]
+        )
+        snapshot_verification_seconds = workload["final_snapshot_verifications"] * float(
+            benchmark["final_snapshot_verify_seconds"]
+        )
+        checkpoint_seconds = (
+            checkpoint_generation_seconds + snapshot_write_seconds + snapshot_verification_seconds
         )
         lower_hours = (
             (training_seconds + prediction_seconds + checkpoint_seconds) / 3600.0
@@ -543,6 +861,21 @@ def estimate_protocol(
                     "training_seconds": training_seconds,
                     "prediction_seconds": prediction_seconds,
                     "checkpoint_seconds": checkpoint_seconds,
+                    "checkpoint_component_seconds": checkpoint_component_seconds,
+                    "checkpoint_pilot_floor_seconds": checkpoint_floor_seconds,
+                    "checkpoint_generation_seconds": checkpoint_generation_seconds,
+                    "checkpoint_pilot_floor_applied": (
+                        checkpoint_floor is not None
+                        and checkpoint_floor_seconds >= checkpoint_component_seconds
+                    ),
+                    "checkpoint_generation_rate_source": (
+                        "authored_machine_pilot_floor"
+                        if checkpoint_floor is not None
+                        and checkpoint_floor_seconds >= checkpoint_component_seconds
+                        else "production_equivalent_component_benchmark"
+                    ),
+                    "final_snapshot_write_seconds": snapshot_write_seconds,
+                    "final_snapshot_verification_seconds": snapshot_verification_seconds,
                 },
                 "measured_compute_hours_range": (
                     [lower_hours, upper_hours] if lower_hours is not None else None
@@ -576,11 +909,13 @@ def estimate_protocol(
         blockers.append("REAL_DATA_PILOT_REQUIRED")
     if final.require_real_pilot and not inventory_available:
         blockers.append("REAL_WORKLOAD_INVENTORY_REQUIRED")
+    if final.require_real_pilot and not checkpoint_floor_available:
+        blockers.append("CHECKPOINT_PILOT_FLOOR_REQUIRED")
     if not eligible:
         blockers.append("NO_STEPS_PER_CREDIT_CANDIDATE_FITS_CAPS")
     return {
         "manifest_version": 1,
-        "feasibility_model_version": 2,
+        "feasibility_model_version": FEASIBILITY_MODEL_VERSION,
         "status": "passed" if not blockers else "blocked",
         "protocol_sha256": protocol_sha256,
         "matrix": matrix,
@@ -608,6 +943,11 @@ def estimate_protocol(
             "method_specific_core_training_included": True,
             "prediction_and_intermediate_inference_included": True,
             "checkpoint_io_included": True,
+            "checkpoint_state_materialization_included": True,
+            "durable_checkpoint_verification_included": True,
+            "final_snapshot_write_and_verification_included": True,
+            "min_checkpoint_generation_seconds": checkpoint_floor,
+            "checkpoint_pilot_floor_machine_specific": checkpoint_floor is not None,
             "worst_case_selection_outcome": "large-feature ES-DFM",
         },
     }

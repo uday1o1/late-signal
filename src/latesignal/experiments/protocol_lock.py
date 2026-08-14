@@ -251,7 +251,7 @@ def create_protocol_lock(
     if selection.protocol_sha256 != protocol_sha256:
         raise ConsistencyError("Selection results do not match the authored protocol")
     if (
-        feasibility.get("feasibility_model_version") != 2
+        feasibility.get("feasibility_model_version") != 3
         or feasibility.get("status") != "passed"
         or feasibility.get("protocol_sha256") != protocol_sha256
         or feasibility.get("blockers") != []

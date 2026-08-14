@@ -17,7 +17,7 @@ def test_public_protocol_validation_reports_exact_external_blockers(
 ) -> None:
     monkeypatch.setattr(
         "latesignal.experiments.estimate._benchmark",
-        lambda _: {
+        lambda *_args, **_kwargs: {
             "requested_device": "cuda",
             "measured_device": "cpu",
             "requested_device_available": False,
@@ -29,6 +29,10 @@ def test_public_protocol_validation_reports_exact_external_blockers(
             "checkpoint_bytes": 1_000_000,
             "model_state_bytes": 400_000,
             "checkpoint_write_seconds": 0.001,
+            "checkpoint_state_materialization_seconds": 0.0004,
+            "checkpoint_durable_write_seconds": 0.0006,
+            "final_snapshot_write_seconds": 0.001,
+            "final_snapshot_verify_seconds": 0.0005,
             "prediction_artifact_bytes_per_row": 32.0,
             "exposure_artifact_bytes_per_row": 16.0,
             "peak_host_memory_gb": 1.0,
@@ -79,3 +83,31 @@ def test_invalid_protocol_error_is_machine_readable(tmp_path: Path) -> None:
     payload = json.loads(result.stdout)
     assert payload["error"] == "INVALID_CONFIGURATION"
     assert payload["details"]["errors"]
+
+
+def test_protocol_estimate_refuses_control_artifacts_in_tracked_repository_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "latesignal.experiments.estimate._benchmark",
+        lambda *_args, **_kwargs: pytest.fail("benchmark must not run for an unsafe output path"),
+    )
+    output = Path.cwd() / "configs" / "unsafe-feasibility-output.json"
+
+    result = runner.invoke(
+        app,
+        [
+            "protocol",
+            "estimate",
+            "configs/experiments/final.yaml",
+            "--out",
+            str(output),
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 2, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["error"] == "INVALID_CONFIGURATION"
+    assert "ignored runs root" in payload["message"]
+    assert not output.exists()

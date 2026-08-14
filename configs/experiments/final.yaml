@@ -32,6 +32,7 @@ pilot:
   assumed_runtime_feature_cache_gb: 2.0
   temporary_margin_gb: 5.0
   assumed_host_memory_gb: 16.0
+  min_checkpoint_generation_seconds: 6.75258791425052
 caps:
   max_runs: 89
   max_gpu_hours: 4.0

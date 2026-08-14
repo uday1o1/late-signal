@@ -54,7 +54,18 @@ The configured target is CUDA.
 If CUDA is unavailable, the command may run a small CPU diagnostic to confirm the software path, but it does not extrapolate that rate to CUDA and the gate remains blocked.
 On the requested device, the bounded model benchmark uses the locked large feature-hash candidate because it is the most resource-intensive permitted architecture.
 The final feasibility benchmark uses the locked training batch size and measured warm-up steps, so its compute projection does not extrapolate throughput across batch sizes.
+Checkpoint timing uses the production CPU-clone state materialization path followed by three generations through the durable rolling checkpoint store.
+The benchmark also writes and verifies a production immutable model snapshot on the execution filesystem.
+The projection separately counts 132 final snapshot writes, 4,875 checkpoint-time snapshot verifications, and 132 terminal exact-set verifications.
+For a qualified machine, the authored minimum checkpoint-generation duration is a conservative floor over the 2,580 actual generations, while the component benchmark is applied to the 4,620 equivalent single-model writes.
+The larger checkpoint estimate is used before snapshot costs are added.
 The configured real-data pilot may inspect no more than two prepared click-day partitions.
+
+The durable benchmark uses a fixed ignored work root beside its feasibility result.
+An in-repository `--out` destination must be under the ignored `runs/` root so an interrupted benchmark cannot strand large artifacts in tracked project paths.
+It holds an exclusive filesystem lock, checks that the work root and result are on the same device, preflights the full rolling-checkpoint peak plus a snapshot and safety margin, and deletes only a marker-verified owned root.
+An interrupted owned benchmark can be retried safely.
+Foreign, redirected, or concurrently owned content fails closed.
 
 Runs execute sequentially under the feasibility storage model.
 An active run reserves three full checkpoint copies for the current checkpoint, previous recoverable checkpoint, and atomic temporary write.
@@ -68,7 +79,8 @@ The final configuration records the resource caps authorized after qualification
 - 25 GiB working disk.
 - 2 GiB retained artifact storage.
 
-These values describe the actual final-run machine and storage budget rather than unlimited resources.
+These values are hard authorization limits rather than predictions or unlimited resources.
+Validation remains blocked when the conservative measured upper range exceeds any checked-in limit.
 Changing the machine or authorized budget requires new feasibility evidence and a new protocol hash.
 The final gate also fails when the requested accelerator is unavailable, the required real-data pilot is unavailable, or no steps-per-credit candidate fits.
 
@@ -94,7 +106,7 @@ The lock command requires passing feasibility evidence and a prepared-data manif
 ```bash
 uv run latesignal protocol lock configs/experiments/final.yaml \
   --selection results/selection.json \
-  --feasibility results/feasibility.json \
+  --feasibility runs/feasibility/final.json \
   --data-manifest data/processed/manifests/preparation.json \
   --out results/protocol-lock.json \
   --json

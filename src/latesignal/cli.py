@@ -21,7 +21,7 @@ from latesignal.data.download import FetchNotice, fetch_dataset
 from latesignal.data.inspect import inspect_locked_archive
 from latesignal.data.manifests import read_json, write_json_atomic
 from latesignal.data.prepare import prepare_data
-from latesignal.errors import ExitCode, LateSignalError
+from latesignal.errors import ConfigurationError, ExitCode, LateSignalError
 from latesignal.evaluation.runner import compare_run_dirs, evaluate_run_dir
 from latesignal.experiments.estimate import estimate_protocol
 from latesignal.experiments.production_aggregate_runner import run_production_aggregate
@@ -533,13 +533,27 @@ def audit_command(json_output: JsonOption = False) -> None:
         raise typer.Exit(code=int(ExitCode.CONSISTENCY_FAILURE))
 
 
-def _protocol_result(config: Path) -> dict[str, Any]:
+def _protocol_result(config: Path, out: Path | None = None) -> dict[str, Any]:
     final, protocol, protocol_sha256 = load_final_protocol(config)
+    repository = Path.cwd().resolve()
+    benchmark_parent = out.parent.resolve() if out is not None else repository / "runs/feasibility"
+    try:
+        in_repository = benchmark_parent.relative_to(repository)
+    except ValueError:
+        pass
+    else:
+        if not in_repository.parts or in_repository.parts[0] != "runs":
+            raise ConfigurationError(
+                "Feasibility output inside the repository must be under the ignored runs root",
+                details={"output_parent": str(benchmark_parent)},
+            )
     return estimate_protocol(
         final,
         protocol,
         config_path=config,
         protocol_sha256=protocol_sha256,
+        checkpoint_work_root=benchmark_parent / ".latesignal-feasibility-benchmark",
+        filesystem_reference=benchmark_parent,
     )
 
 
@@ -571,7 +585,7 @@ def protocol_estimate(
     """Benchmark the local stack and project the exact authored matrix."""
 
     try:
-        result = _protocol_result(config)
+        result = _protocol_result(config, out)
         if out is not None:
             write_json_atomic(out, result)
     except LateSignalError as error:

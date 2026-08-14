@@ -130,8 +130,10 @@ Estimate it with:
 uv run latesignal protocol estimate configs/experiments/final.yaml --json
 ```
 
-The checked-in final configuration records the authorized 89-run, 4 GPU-hour, 25 GiB working-disk, and 2 GiB retained-artifact caps measured for the qualified workstation.
-Strict validation passes only on that CUDA-class machine with the verified prepared data available; a CPU-only environment remains blocked.
+The checked-in final configuration records hard authorization limits of 89 runs, 4 GPU-hours, 25 GiB working disk, and 2 GiB retained artifacts.
+The estimator includes production-equivalent durable checkpoint and snapshot costs plus a machine-specific floor measured from completed checkpoint generations.
+Strict validation intentionally blocks if its conservative upper range exceeds the checked-in limits.
+Strict validation can pass only on that CUDA-class machine with the verified prepared data available and every authored cap satisfied; a CPU-only environment remains blocked.
 See [Experimental protocol](docs/experimental-protocol.md) for feasibility, selection, protocol-lock, and uncertainty rules.
 
 ## Run the one-shot GPU study
@@ -144,7 +146,7 @@ bash tools/gpu-study.sh submit cuda-pm 1
 
 The submit command checks the remote toolchain, GPU availability, stable GPU UUID, memory, disk, and local and remote Git identities, then transfers the prepared dataset before it starts tmux in a detached commit worktree.
 Exact prepared-manifest and file verification is the first gate inside the detached job.
-The remote job installs the frozen environment, builds truth-free feature caches, runs the complete software gate, reruns feasibility, executes all 50 selection candidates, freezes the protocol, passes the CUDA checkpoint-resume qualification, runs all 39 final candidates, aggregates the report, and prunes rebuildable caches.
+The remote job installs the frozen environment, builds truth-free feature caches, runs the complete software gate, reruns production-equivalent feasibility, executes all 50 selection candidates, freezes the protocol, passes the CUDA checkpoint-resume qualification, runs all 39 final candidates, aggregates the report, and prunes rebuildable caches.
 It stops instead of scoring when any prerequisite or gate fails.
 After the command confirms the started receipt, the Mac may disconnect, sleep, or shut down without affecting the job.
 

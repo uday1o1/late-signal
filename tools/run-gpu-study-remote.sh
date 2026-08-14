@@ -461,7 +461,7 @@ eligible = [
     and all(item.get("cap_checks", {}).values())
 ]
 if (
-    value.get("feasibility_model_version") != 2
+    value.get("feasibility_model_version") != 3
     or value.get("status") != "passed"
     or value.get("blockers") != []
     or value.get("matrix", {}).get("total_runs") != 89
