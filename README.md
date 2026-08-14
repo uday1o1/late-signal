@@ -1,84 +1,151 @@
 # LateSignal
 
-LateSignal is a leakage-audited event-time benchmark for learning conversion probability when positive labels arrive late and negatives become known only after a maturity window.
-It also evaluates when a fixed compute budget should be spent using calibration evidence from legally mature cohorts.
+LateSignal is a leakage-audited event-time benchmark for ML engineers and researchers studying conversion learning when positive labels arrive late and negatives become known only after a maturity window.
+It compares delayed-label methods and asks when a fixed training budget should be spent using calibration evidence from legally mature cohorts.
 
-The repository is under active implementation against [BUILD_PLAN.md](BUILD_PLAN.md).
-The current implemented surface covers the licensing and data-audit foundation, data preparation, synthetic event-time vertical slice, shared conversion model, offline sanity references, synthetic Study A qualification, and compute-matched Study B scheduler qualification.
-No Criteo data or measured model result is included.
+The repository includes a deterministic CPU workflow that runs without licensed data, guarded Criteo acquisition and preparation, matched method and scheduler studies, sealed evaluation, paired uncertainty, protocol locking, feasibility estimation, and aggregate-only static reporting.
+No Criteo row or measured real-data result is included.
 
-## Development setup
+## What this demonstrates
 
-Install `uv`, then run:
+- Prediction is persisted before a truth reveal at the same timestamp.
+- Training records cannot enter the learner before their legal availability time.
+- Monitoring examples are permanently excluded from training.
+- Study A gives every delayed-label method the same schedule and core optimizer budget.
+- Study B gives every scheduler the same credits, steps, learner, sampler, and loss.
+- Final comparisons require matched click IDs, truth, click days, seeds, and paired block-bootstrap uncertainty.
+- A hashed protocol lock binds configuration, data, code, environment, selections, and compute before final scoring.
+- Public reports accept aggregate inputs only and expose support counts, uncertainty, and compute.
+
+## Requirements
+
+The CPU workflow requires Python 3.12 and [`uv`](https://docs.astral.sh/uv/).
+The licensed workflow additionally requires accepted noncommercial access to the Criteo Sponsored Search Conversion Log and at least 30 GiB of local disk.
+The locked final experiment targets an NVIDIA CUDA GPU with at least 8 GiB of memory and approximately 16 GiB of host memory.
+The GPU is not required for setup, tests, or the synthetic studies.
+
+## Install
 
 ```console
-uv sync --all-groups
+uv sync --frozen --all-groups
 uv run latesignal --help
-make check
 ```
 
-Python 3.12 is the locked runtime.
-Hosted verification is CPU-only and never downloads the licensed dataset.
+## First run
 
-## Dataset acknowledgement
-
-Read [DATA_LICENSE.md](DATA_LICENSE.md) and the linked source terms first.
-The official download is deliberately unavailable without an affirmative flag:
+Run the complete deterministic event-time path without licensed data:
 
 ```console
-uv run latesignal data fetch --accept-license
+uv run latesignal run configs/experiments/synthetic.yaml --out runs/synthetic --json
 ```
 
-When no authoritative SHA-256 is configured, the first authorized download is retained by content hash but remains untrusted.
-The command prints the observed SHA-256 and an exact second command for explicit first-download review.
-Preparation and inspection refuse an untrusted artifact.
+A successful run ends with one JSON object like this:
 
-Raw data and every derived row-level artifact are ignored by Git.
-
-After a reviewed archive has an immutable inspection manifest, prepare it with:
-
-```console
-uv run latesignal data prepare
+```json
+{
+  "ok": true,
+  "status": "complete",
+  "counts": {
+    "predictions": 6,
+    "available_records": 6,
+    "credits": 2,
+    "optimizer_steps": 8,
+    "optimizer_examples": 20,
+    "checkpoints": 2
+  },
+  "manifest": "runs/synthetic/manifest.json"
+}
 ```
 
-Preparation uses bounded Polars batches and explicit Arrow schemas to publish physically separate click-day feature partitions and reveal-day or maturity-day truth partitions.
-The command refuses to overwrite an existing prepared store.
-
-## Synthetic vertical slice
-
-Run the complete deterministic CPU path without licensed data:
-
-```console
-uv run latesignal run configs/experiments/synthetic.yaml --out runs/synthetic
-```
-
-The run writes predictions before same-time reveals, drains final truth after the last click, and records metrics, compute ledgers, checkpoints, and a reproducibility manifest.
+The command writes prediction, availability, credit, exposure, and event ledgers plus checkpoints, metrics, and a reproducibility manifest.
 Resume an interrupted run into a new directory with:
 
 ```console
-uv run latesignal resume runs/synthetic/checkpoints/CHECKPOINT.json --out runs/resumed
+uv run latesignal resume runs/synthetic/checkpoints/CHECKPOINT.json --out runs/resumed --json
 ```
 
-## Synthetic Study A qualification
+## Compare delayed-label methods
 
-Run every delayed-label method through one shared initialization checkpoint, fixed schedule, and exactly reconciled core budget without licensed data:
+Run every Study A method through one shared initialization checkpoint, fixed schedule, and exactly reconciled core budget:
 
 ```console
-uv run latesignal run configs/experiments/study_a.synthetic.yaml --out runs/study-a
+uv run latesignal run configs/experiments/study_a.synthetic.yaml --out runs/study-a --json
 ```
 
-This bounded path qualifies complete wait, immediate fake negative, fixed wait, DFM, FNW, the ES-DFM constant-wait transfer, and the separate unattainable oracle.
-It reports method-specific auxiliary compute separately and does not claim to reproduce any published result.
-See [docs/delayed-methods.md](docs/delayed-methods.md) for equations, citations, and transfer boundaries.
+The bounded path covers complete wait, immediate fake negative, fixed wait, DFM, FNW, the ES-DFM constant-wait transfer, and the separate unattainable oracle.
+It reports method-specific auxiliary compute separately and does not claim to reproduce a published number.
+See [Delayed-label methods](docs/delayed-methods.md) for equations, citations, and transfer boundaries.
 
-## Synthetic Study B qualification
+## Compare credit schedulers
 
-Run the three fixed timing policies and the calibration-drift scheduler over the complete 59-day adaptive horizon without licensed data:
+Run the three fixed timing policies and the calibration-drift scheduler over the complete 59-day adaptive horizon:
 
 ```console
-uv run latesignal run configs/experiments/study_b.synthetic.yaml --out runs/study-b
+uv run latesignal run configs/experiments/study_b.synthetic.yaml --out runs/study-b --json
 ```
 
-The path retains the final partial five-day window, spends exactly 12 credits per policy, performs identical daily mature-monitoring inference, and rejects monitoring IDs from training.
+The path retains the final partial five-day window, spends exactly 12 credits per policy, performs identical mature-monitoring inference, and rejects monitoring IDs from training.
 Its authored synthetic shift must trigger the calibration scheduler before the fixed deadline.
-See [docs/scheduler.md](docs/scheduler.md) for the residual equation and audit fields.
+See [Credit scheduling](docs/scheduler.md) for the residual equation and audit fields.
+
+## Use the licensed dataset
+
+Read [DATA_LICENSE.md](DATA_LICENSE.md) and the linked source terms before downloading.
+The normal acquisition path is unavailable without an affirmative acknowledgement:
+
+```console
+uv run latesignal data fetch --accept-license --json
+```
+
+When no authoritative SHA-256 is configured, the first complete download is retained by content hash but remains untrusted.
+The command displays the observed SHA-256 and an exact second command for explicit first-download review.
+Inspection and preparation refuse an untrusted artifact.
+
+After the artifact is reviewed and locked, run:
+
+```console
+uv run latesignal data inspect --json
+uv run latesignal data prepare --json
+```
+
+Preparation uses bounded Polars batches and explicit Arrow schemas to publish physically separate click-day feature partitions and reveal-day or maturity-day truth partitions.
+Raw data and every derived row-level artifact remain ignored by Git.
+
+## Lock a final protocol
+
+The authored matrix cannot silently omit a required candidate, method, scheduler, offline reference, or seed.
+Estimate it with:
+
+```console
+uv run latesignal protocol estimate configs/experiments/final.yaml --json
+```
+
+The checked-in final configuration intentionally leaves machine-specific resource caps unset.
+Validation remains blocked until the actual CUDA machine caps and real prepared-data pilot are available.
+See [Experimental protocol](docs/experimental-protocol.md) for feasibility, selection, protocol-lock, and uncertainty rules.
+
+## Render an aggregate report
+
+Given a validated `RUN_DIR/report-input.json`, render static HTML and flat evidence tables with:
+
+```console
+uv run latesignal report RUN_DIR --format html --json
+```
+
+The report input schema rejects unknown row-level fields.
+The output contains `report.html`, aggregate CSV tables, and a content-hashed manifest.
+
+## Documentation
+
+- [Architecture](docs/architecture.md)
+- [Leakage model](docs/leakage-model.md)
+- [Experimental protocol](docs/experimental-protocol.md)
+- [Reproducibility](docs/reproducibility.md)
+- [Limitations and threats to validity](docs/limitations.md)
+- [Dataset and license](docs/dataset-and-license.md)
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the local verification workflow and contribution rules.
+Hosted CI is CPU-only and never downloads the licensed dataset.
+A manual trusted-runner workflow provides the bounded CUDA qualification path.
