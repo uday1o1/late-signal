@@ -9,6 +9,7 @@ from typing import Any
 from latesignal.contracts.protocol import load_final_protocol
 from latesignal.data.manifests import read_json
 from latesignal.errors import ConsistencyError
+from latesignal.experiments.cuda_device import require_selected_cuda_device
 from latesignal.experiments.selection_coordinator import run_selection_coordinator
 from latesignal.experiments.selection_dag import SelectionPlanInputs
 from latesignal.experiments.selection_executor import ProductionSelectionExecutor
@@ -34,6 +35,7 @@ def run_production_selection(
     """Execute all 50 frozen selection candidates through the real-data path."""
 
     os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+    require_selected_cuda_device(device_uuid)
     configure_determinism(17)
     final, protocol, protocol_sha256 = load_final_protocol(config_path)
     if (

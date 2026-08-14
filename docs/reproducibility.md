@@ -53,6 +53,44 @@ Raw data, prepared rows, acknowledgements, quarantine rows, checkpoints, and ord
 ## Feasibility and selection
 
 The actual final-run machine owner must supply all four caps in `configs/experiments/final.yaml`.
+The supported workflow submits the complete sequence from the acquisition Mac with one command:
+
+```bash
+bash tools/gpu-study.sh submit cuda-pm 1
+```
+
+The final argument is the physical GPU index used only to resolve a stable GPU UUID.
+Every CUDA process then uses that UUID through `CUDA_VISIBLE_DEVICES`, and the Python entry points require exactly one visible device.
+The submit command copies only `data/processed/`, starts the detached job, confirms a commit-specific started receipt, and then returns.
+The detached job verifies the exact preparation manifest and every prepared file before any experiment runs.
+All remaining work runs inside a detached remote tmux session and an immutable commit-specific Git worktree, so it does not depend on the Mac remaining powered on or connected.
+
+Use these commands from the same checked-out commit:
+
+```bash
+bash tools/gpu-study.sh status cuda-pm
+bash tools/gpu-study.sh logs cuda-pm
+bash tools/gpu-study.sh follow cuda-pm
+bash tools/gpu-study.sh attach cuda-pm
+bash tools/gpu-study.sh collect cuda-pm
+```
+
+`status` is a bounded snapshot, `logs` prints the latest lines, and `follow` or `attach` remains connected only for observation.
+Closing either observation command does not stop the detached job.
+Reusing `submit` after an interrupted or infrastructure-failed session resumes immutable stage evidence for the same commit.
+An active duplicate or already completed commit is refused.
+
+The remote driver holds a GPU-specific lock, rejects foreign compute processes, enforces the authored 25 GiB working cap and 2 GiB retained cap, records a launch-scoped heartbeat every 30 seconds, and applies a separate 12-hour wall-clock safety limit.
+It conservatively charges all detached-job elapsed time, polling overhead, and a bounded resume allowance against the 4 GPU-hour cap so sampling cannot undercount short GPU work.
+It retries only a stable exit-code-4 infrastructure failure once.
+Configuration, data, consistency, resource, timeout, and scientific gate failures are not converted into passing results.
+The rebuildable runtime feature and package caches are removed only after the aggregate report passes.
+Prepared data is not deleted.
+Feasibility reuse is allowed only when the commit, source tree, dependency lock, prepared-data manifest, final configuration, runtime, GPU UUID, GPU model, driver, and memory identity still match.
+Collection verifies every permitted relative path, file type, size, and SHA-256 against an immutable aggregate-only manifest before promoting a new local destination.
+A failed collection leaves its uniquely named temporary directory for diagnosis, and a retry uses a fresh temporary directory without overwriting either evidence set.
+
+The following manual commands document the underlying stages and are useful for auditing the automation.
 Run the bounded estimator on the intended CUDA machine with prepared data available:
 
 ```bash

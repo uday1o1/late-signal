@@ -8,8 +8,8 @@ from typing import Any
 
 from latesignal.contracts.protocol import load_final_protocol
 from latesignal.errors import ConsistencyError
+from latesignal.experiments.cuda_device import require_selected_cuda_device
 from latesignal.experiments.production_final import FinalPlanInputs, final_online_plans
-from latesignal.experiments.production_final_runner import _require_selected_cuda_device
 from latesignal.experiments.production_qualification import run_production_qualification
 from latesignal.experiments.protocol_lock import (
     verify_locked_final_runtime,
@@ -34,7 +34,7 @@ def run_final_qualification(
     """Run the complete locked gate and real-schema CUDA resume rehearsal."""
 
     os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
-    _require_selected_cuda_device(device_uuid)
+    require_selected_cuda_device(device_uuid)
     final, protocol, protocol_sha256 = load_final_protocol(config_path)
     lock = verify_protocol_lock(protocol_lock_path)
     verify_locked_final_runtime(

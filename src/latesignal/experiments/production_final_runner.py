@@ -7,11 +7,10 @@ import os
 from pathlib import Path
 from typing import Any
 
-import torch
-
 from latesignal.contracts.protocol import load_final_protocol
 from latesignal.data.manifests import canonical_json_bytes, read_json, write_json_atomic
 from latesignal.errors import ConsistencyError
+from latesignal.experiments.cuda_device import require_selected_cuda_device
 from latesignal.experiments.final_coordinator import run_final_online_coordinator
 from latesignal.experiments.final_executor import ProductionFinalExecutor
 from latesignal.experiments.production_final import FinalPlanInputs, final_online_plans
@@ -31,20 +30,6 @@ from latesignal.simulator.production_oracle import load_production_truth
 from latesignal.training.reproducibility import capture_runtime_identity, configure_determinism
 
 
-def _require_selected_cuda_device(device_uuid: str) -> None:
-    visible = os.environ.get("CUDA_VISIBLE_DEVICES")
-    if (
-        not device_uuid.startswith("GPU-")
-        or visible != device_uuid
-        or not torch.cuda.is_available()
-        or torch.cuda.device_count() != 1
-    ):
-        raise ConsistencyError(
-            "Final scoring requires exactly one CUDA device selected by its stable GPU UUID",
-            details={"expected_cuda_visible_devices": device_uuid, "actual": visible},
-        )
-
-
 def run_production_final(
     config_path: Path,
     *,
@@ -59,7 +44,7 @@ def run_production_final(
     """Execute or resume all 33 locked final online runs."""
 
     os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
-    _require_selected_cuda_device(device_uuid)
+    require_selected_cuda_device(device_uuid)
     configure_determinism(17)
     final, protocol, protocol_sha256 = load_final_protocol(config_path)
     lock = verify_protocol_lock(protocol_lock_path)
