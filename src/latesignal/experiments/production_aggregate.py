@@ -685,7 +685,7 @@ def _aggregate_report(
         and lock["selection_execution"].get("mode") == "verified_cross_commit_reuse"
     ):
         limitations.append(
-            "Selection evidence came from the immediately preceding clean commit; hashed "
+            "Selection evidence came from an earlier clean commit; hashed "
             "provenance records that the intervening change fixed dataset-relative scheduler "
             "boundary validation after selection and before final scoring."
         )

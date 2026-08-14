@@ -17,6 +17,10 @@ REMOTE_DRIVER = Path("tools/run-gpu-study-remote.sh").resolve()
 RESUME_HELPER = Path("tools/prepare-selection-resume.py").resolve()
 
 
+def _canonical_fixture(value: object) -> bytes:
+    return (json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode()
+
+
 def test_remote_gpu_script_help_is_safe_and_bounded() -> None:
     result = subprocess.run(
         ["bash", str(SCRIPT), "--help"],
@@ -195,6 +199,12 @@ def test_selection_resume_helper_seals_only_the_exact_safe_failure(tmp_path: Pat
         path.write_text(f"target fixture: {relative}\n", encoding="utf-8")
     subprocess.run(["git", "-C", str(repository), "add", "."], check=True)
     subprocess.run(["git", "-C", str(repository), "commit", "-qm", "target"], check=True)
+    with (repository / "tools" / "prepare-selection-resume.py").open(
+        "a", encoding="utf-8"
+    ) as helper:
+        helper.write("verifier canonicalization fix\n")
+    subprocess.run(["git", "-C", str(repository), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(repository), "commit", "-qm", "verifier fix"], check=True)
     target_commit = subprocess.run(
         ["git", "-C", str(repository), "rev-parse", "HEAD"],
         check=True,
@@ -208,23 +218,18 @@ def test_selection_resume_helper_seals_only_the_exact_safe_failure(tmp_path: Pat
     target.mkdir(parents=True)
 
     selection = {"version": 1, "protocol_sha256": "3" * 64}
-    selection_bytes = json.dumps(selection, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+    selection_bytes = _canonical_fixture(selection)
     (selection_root / "selection-results.json").write_bytes(selection_bytes)
     selection_manifest: dict[str, object] = {
         "version": 1,
         "status": "complete",
         "candidate_counts": {"model": 36, "delayed": 8, "sampler": 6, "total": 50},
-        "selection_results_sha256": hashlib.sha256(
-            json.dumps(selection, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest(),
+        "selection_results_sha256": hashlib.sha256(selection_bytes).hexdigest(),
     }
     selection_manifest["manifest_sha256"] = hashlib.sha256(
-        json.dumps(selection_manifest, sort_keys=True, separators=(",", ":")).encode()
+        _canonical_fixture(selection_manifest)
     ).hexdigest()
-    (selection_root / "manifest.json").write_text(
-        json.dumps(selection_manifest, sort_keys=True, separators=(",", ":")) + "\n",
-        encoding="utf-8",
-    )
+    (selection_root / "manifest.json").write_bytes(_canonical_fixture(selection_manifest))
     protocol_lock: dict[str, object] = {
         "status": "locked",
         "publication_eligible": True,
@@ -236,13 +241,8 @@ def test_selection_resume_helper_seals_only_the_exact_safe_failure(tmp_path: Pat
         "selected_steps_per_credit": 100,
         "selection_file_sha256": hashlib.sha256(selection_bytes).hexdigest(),
     }
-    protocol_lock["lock_sha256"] = hashlib.sha256(
-        json.dumps(protocol_lock, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
-    (source / "protocol-lock.json").write_text(
-        json.dumps(protocol_lock, sort_keys=True, separators=(",", ":")) + "\n",
-        encoding="utf-8",
-    )
+    protocol_lock["lock_sha256"] = hashlib.sha256(_canonical_fixture(protocol_lock)).hexdigest()
+    (source / "protocol-lock.json").write_bytes(_canonical_fixture(protocol_lock))
     launch_id = "source-launch"
     common = {
         "status": "failed",

@@ -48,7 +48,7 @@ _NEW_BOUNDARY_CHECK = (
 
 
 def _canonical(value: object) -> bytes:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    return (json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode()
 
 
 def _read(path: Path) -> dict[str, Any]:
@@ -80,11 +80,39 @@ def _git(repository: Path, *arguments: str) -> str:
     return result.stdout.strip()
 
 
-def _verify_target_diff(repository: Path, source_commit: str, target_commit: str) -> None:
+def _verify_target_diff(repository: Path, source_commit: str, target_commit: str) -> list[str]:
     if _git(repository, "rev-parse", "HEAD") != target_commit:
         raise ValueError("resume target repository is not at the target commit")
-    if _git(repository, "rev-parse", f"{target_commit}^") != source_commit:
-        raise ValueError("resume source is not the immediate parent of the target commit")
+    ancestry = subprocess.run(
+        ["git", "-C", str(repository), "merge-base", "--is-ancestor", source_commit, target_commit],
+        check=False,
+    )
+    if ancestry.returncode != 0:
+        raise ValueError("resume source is not an ancestor of the target commit")
+    raw_chain = _git(
+        repository,
+        "rev-list",
+        "--reverse",
+        "--ancestry-path",
+        "--parents",
+        f"{source_commit}..{target_commit}",
+    ).splitlines()
+    if not 1 <= len(raw_chain) <= 2:
+        raise ValueError("resume recovery chain is longer than the reviewed bound")
+    reviewed_commits: list[str] = []
+    previous = source_commit
+    for raw in raw_chain:
+        fields = raw.split()
+        if len(fields) != 2 or fields[1] != previous:
+            raise ValueError("resume recovery chain contains a merge or discontinuity")
+        commit = fields[0]
+        per_commit = set(_git(repository, "diff", "--name-only", previous, commit).splitlines())
+        if not per_commit or not per_commit.issubset(_ALLOWED_DIFF_PATHS):
+            raise ValueError("resume recovery commit is outside the reviewed allowlist")
+        reviewed_commits.append(commit)
+        previous = commit
+    if previous != target_commit:
+        raise ValueError("resume recovery chain does not end at the target commit")
     changed = set(
         _git(repository, "diff", "--name-only", source_commit, target_commit).splitlines()
     )
@@ -105,6 +133,7 @@ def _verify_target_diff(repository: Path, source_commit: str, target_commit: str
         _OLD_BOUNDARY_CHECK, _NEW_BOUNDARY_CHECK, 1
     ):
         raise ValueError("scheduler boundary fix differs from the reviewed exact replacement")
+    return reviewed_commits
 
 
 def _selection_identity(root: Path) -> tuple[str, dict[str, Any]]:
@@ -142,7 +171,7 @@ def build_provenance(
     ):
         raise ValueError("resume commit identities are invalid")
     repository = target.parents[2]
-    _verify_target_diff(repository, source_commit, target_commit)
+    reviewed_commits = _verify_target_diff(repository, source_commit, target_commit)
     state = _read(source / "state.json")
     exit_receipt = _read(source / "exit.json")
     heartbeat = _read(source / "heartbeat.json")
@@ -216,6 +245,7 @@ def build_provenance(
         "reason": "post_selection_scheduler_boundary_fix",
         "source_commit": source_commit,
         "target_commit": target_commit,
+        "reviewed_recovery_commits": reviewed_commits,
         "reviewed_diff_paths": sorted(_ALLOWED_DIFF_PATHS),
         "source_exit_stage": "cuda_resume_qualification",
         "source_exit_code": 5,
