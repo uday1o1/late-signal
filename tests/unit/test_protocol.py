@@ -130,6 +130,15 @@ def test_protocol_refuses_a_silently_narrowed_candidate_set(tmp_path: Path) -> N
     assert "locked candidate set" in str(caught.value.details)
 
 
+def test_checked_in_final_resource_caps_match_the_authorized_ceiling() -> None:
+    final, _, _ = load_final_protocol(Path("configs/experiments/final.yaml"))
+
+    assert final.caps.max_runs == 89
+    assert final.caps.max_gpu_hours == 25.0
+    assert final.caps.max_working_disk_gb == 26.0
+    assert final.caps.max_retained_disk_gb == 2.0
+
+
 def test_estimator_selects_largest_quality_independent_candidate_that_fits(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -719,9 +719,35 @@ def _aggregate_report(
             "leakage_audit": quality_controls,
             "limitations": limitations,
             "reproduction_commands": [
-                "bash tools/gpu-study.sh submit cuda-pm 1",
-                "bash tools/gpu-study.sh status cuda-pm",
-                "bash tools/gpu-study.sh collect cuda-pm",
+                "uv sync --frozen --all-groups",
+                "uv run latesignal protocol validate configs/experiments/final.yaml "
+                "--out runs/feasibility/final.json --json",
+                "uv run latesignal selection run configs/experiments/final.yaml "
+                "--data-manifest data/processed/manifests/preparation.json "
+                "--feature-config configs/features.yaml --cache-root data/runtime-features "
+                "--out runs/selection --steps-per-credit SELECTED_STEPS "
+                "--device-uuid GPU_UUID --json",
+                "uv run latesignal protocol lock configs/experiments/final.yaml "
+                "--selection runs/selection/selection-results.json "
+                "--feasibility runs/feasibility/final.json "
+                "--data-manifest data/processed/manifests/preparation.json "
+                "--out runs/protocol-lock.json --json",
+                "uv run latesignal final qualify configs/experiments/final.yaml "
+                "--protocol-lock runs/protocol-lock.json "
+                "--data-manifest data/processed/manifests/preparation.json "
+                "--feature-config configs/features.yaml --cache-root data/runtime-features "
+                "--out runs/quality-gate.json --device-uuid GPU_UUID --json",
+                "uv run latesignal final run configs/experiments/final.yaml "
+                "--protocol-lock runs/protocol-lock.json "
+                "--data-manifest data/processed/manifests/preparation.json "
+                "--feature-config configs/features.yaml --cache-root data/runtime-features "
+                "--out runs/final --device-uuid GPU_UUID --json",
+                "uv run latesignal final aggregate configs/experiments/final.yaml "
+                "--protocol-lock runs/protocol-lock.json "
+                "--data-manifest data/processed/manifests/preparation.json "
+                "--feature-config configs/features.yaml --cache-root data/runtime-features "
+                "--out runs/final --quality-gate runs/quality-gate.json "
+                "--device-uuid GPU_UUID --json",
             ],
             "claim": {
                 "scheduler_outcome": outcome["outcome"],

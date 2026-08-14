@@ -136,31 +136,27 @@ Strict validation intentionally blocks if its conservative upper range exceeds t
 Strict validation can pass only on that CUDA-class machine with the verified prepared data available and every authored cap satisfied; a CPU-only environment remains blocked.
 See [Experimental protocol](docs/experimental-protocol.md) for feasibility, selection, protocol-lock, and uncertainty rules.
 
-## Run the one-shot GPU study
+## Run the final study on CUDA
 
-The supported final workflow submits the exact clean `origin/main` revision into a detached tmux session on the trusted GPU host:
-
-```console
-bash tools/gpu-study.sh submit cuda-pm 1
-```
-
-The submit command checks the remote toolchain, GPU availability, stable GPU UUID, memory, disk, and local and remote Git identities, then transfers the prepared dataset before it starts tmux in a detached commit worktree.
-Exact prepared-manifest and file verification is the first gate inside the detached job.
-The remote job installs the frozen environment, builds truth-free feature caches, runs the complete software gate, reruns production-equivalent feasibility, executes all 50 selection candidates, freezes the protocol, passes the CUDA checkpoint-resume qualification, runs all 39 final candidates, aggregates the report, and prunes rebuildable caches.
-It stops instead of scoring when any prerequisite or gate fails.
-After the command confirms the started receipt, the Mac may disconnect, sleep, or shut down without affecting the job.
-
-Inspect or collect it later with:
+Clone the repository directly into the selected CUDA environment and install the frozen dependencies:
 
 ```console
-bash tools/gpu-study.sh status cuda-pm
-bash tools/gpu-study.sh logs cuda-pm
-bash tools/gpu-study.sh collect cuda-pm
+uv sync --frozen --all-groups
+make check
 ```
 
-Collection refuses a mixed destination and copies only feasibility, selection decisions, the protocol lock, the quality receipt, and files sealed by the aggregate-only collection manifest.
-It does not copy row-level predictions, checkpoints, model weights, prepared rows, or the licensed source archive.
-See [Reproducibility](docs/reproducibility.md) for recovery and resource-limit behavior.
+After accepting the dataset terms and preparing the licensed data, run the strict machine-bound feasibility gate:
+
+```console
+uv run latesignal protocol validate configs/experiments/final.yaml \
+  --out runs/feasibility/final.json \
+  --json
+```
+
+Selection must not start unless validation passes every authored cap and selects the largest eligible training budget without consulting a quality metric.
+The public CLI then runs selection, freezes the protocol, qualifies CUDA checkpoint resume, executes the final matrix, and aggregates the report.
+Every stage writes immutable resumable evidence under ignored run directories and refuses mismatched code, environment, data, or GPU identities.
+See [Reproducibility](docs/reproducibility.md) for the complete resource-neutral command sequence and recovery rules.
 
 ## Render an aggregate report
 

@@ -341,6 +341,9 @@ def test_final_aggregate_builds_strict_truthful_report_input() -> None:
     assert {item.scheduler for item in report.schedulers} == set(SCHEDULERS)
     assert len(report.paired_intervals) == 96
     assert report.claim.scheduler_outcome == "supported"
+    assert any("protocol validate" in command for command in report.reproduction_commands)
+    assert any("final qualify" in command for command in report.reproduction_commands)
+    assert all("ssh" not in command.lower() for command in report.reproduction_commands)
     assert outcome["supported"] is True
 
 

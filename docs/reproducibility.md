@@ -52,46 +52,12 @@ Raw data, prepared rows, acknowledgements, quarantine rows, checkpoints, and ord
 
 ## Feasibility and selection
 
-The actual final-run machine owner must supply all four caps in `configs/experiments/final.yaml`.
-The supported workflow submits the complete sequence from the acquisition Mac with one command:
+Run the final workflow from one clean clone in the selected CUDA environment.
+The prepared dataset may be rebuilt there or mounted from permitted storage, but the source archive and expanded raw file are not required during training.
+The exact preparation manifest and every prepared file are rehashed before the protocol can be locked.
 
-```bash
-bash tools/gpu-study.sh submit cuda-pm 1
-```
-
-The final argument is the physical GPU index used only to resolve a stable GPU UUID.
-Every CUDA process then uses that UUID through `CUDA_VISIBLE_DEVICES`, and the Python entry points require exactly one visible device.
-The submit command copies only `data/processed/`, starts the detached job, confirms a commit-specific started receipt, and then returns.
-The detached job verifies the exact preparation manifest and every prepared file before any experiment runs.
-All remaining work runs inside a detached remote tmux session and an immutable commit-specific Git worktree, so it does not depend on the Mac remaining powered on or connected.
-
-Use these commands from the same checked-out commit:
-
-```bash
-bash tools/gpu-study.sh status cuda-pm
-bash tools/gpu-study.sh logs cuda-pm
-bash tools/gpu-study.sh follow cuda-pm
-bash tools/gpu-study.sh attach cuda-pm
-bash tools/gpu-study.sh collect cuda-pm
-```
-
-`status` is a bounded snapshot, `logs` prints the latest lines, and `follow` or `attach` remains connected only for observation.
-Closing either observation command does not stop the detached job.
-Reusing `submit` after an interrupted or infrastructure-failed session resumes immutable stage evidence for the same commit.
-An active duplicate or already completed commit is refused.
-
-The remote driver holds a GPU-specific lock, rejects foreign compute processes, enforces the authored 26 GiB working cap and 2 GiB retained cap, records a launch-scoped heartbeat every 30 seconds, and applies a separate 30-hour wall-clock safety limit.
-It conservatively charges all detached-job elapsed time, polling overhead, and a bounded resume allowance against the 25 GPU-hour cap so sampling cannot undercount short GPU work.
-It retries only a stable exit-code-4 infrastructure failure once.
-Configuration, data, consistency, resource, timeout, and scientific gate failures are not converted into passing results.
-The rebuildable runtime feature and package caches are removed only after the aggregate report passes.
-Prepared data is not deleted.
-Feasibility reuse is allowed only when the commit, source tree, dependency lock, prepared-data manifest, final configuration, runtime, GPU UUID, GPU model, driver, and memory identity still match.
-Collection verifies every permitted relative path, file type, size, and SHA-256 against an immutable aggregate-only manifest before promoting a new local destination.
-A failed collection leaves its uniquely named temporary directory for diagnosis, and a retry uses a fresh temporary directory without overwriting either evidence set.
-
-The following manual commands document the underlying stages and are useful for auditing the automation.
-Run the bounded estimator on the intended CUDA machine with prepared data available:
+The checked-in final configuration provides all four resource caps.
+Run the strict bounded estimator with the prepared data and intended CUDA device available:
 
 ```bash
 uv run latesignal protocol validate configs/experiments/final.yaml \
@@ -105,7 +71,8 @@ The projection includes shared initialization, method-specific core training, wo
 The estimator benchmarks checkpoint artifacts in a fixed ignored work root on the result filesystem and removes that root after a normal completion.
 Its ownership marker and exclusive lock make a retry recoverable without permitting deletion of foreign content.
 The machine-specific checkpoint-generation floor is part of the hashed final configuration, and the estimator uses it whenever it is more conservative than the component benchmark.
-The remote execution host receives prepared data but not the licensed archive or expanded source file, which remain on the acquisition machine.
+The training environment requires only the verified prepared partitions after preparation completes.
+The licensed archive and expanded source file remain ignored and must not be committed or copied to an unauthorized location.
 
 Selection runs use outcomes only for click days 25 through 34 and record every attempted candidate.
 Run or resume the frozen 36 + 8 + 6 selection graph with the feasibility-selected budget:
@@ -125,15 +92,52 @@ After the complete selection evidence exists, create the pre-scoring lock:
 
 ```bash
 uv run latesignal protocol lock configs/experiments/final.yaml \
-  --selection results/selection.json \
+  --selection runs/selection/selection-results.json \
   --feasibility runs/feasibility/final.json \
   --data-manifest data/processed/manifests/preparation.json \
-  --out results/protocol-lock.json \
+  --out runs/protocol-lock.json \
   --json
 ```
 
 Do not use `--allow-dirty` for a publication run.
 Do not inspect a final-period metric before the lock exists.
+
+Replace `SELECTED_STEPS` and `GPU_UUID` with the exact feasibility result and stable NVIDIA device UUID used throughout the run.
+Qualify checkpoint resume before final scoring:
+
+```bash
+uv run latesignal final qualify configs/experiments/final.yaml \
+  --protocol-lock runs/protocol-lock.json \
+  --data-manifest data/processed/manifests/preparation.json \
+  --feature-config configs/features.yaml \
+  --cache-root data/runtime-features \
+  --out runs/quality-gate.json \
+  --device-uuid GPU_UUID \
+  --json
+```
+
+Run or resume the complete final matrix, then aggregate only after all 39 runs complete:
+
+```bash
+uv run latesignal final run configs/experiments/final.yaml \
+  --protocol-lock runs/protocol-lock.json \
+  --data-manifest data/processed/manifests/preparation.json \
+  --feature-config configs/features.yaml \
+  --cache-root data/runtime-features \
+  --out runs/final \
+  --device-uuid GPU_UUID \
+  --json
+
+uv run latesignal final aggregate configs/experiments/final.yaml \
+  --protocol-lock runs/protocol-lock.json \
+  --data-manifest data/processed/manifests/preparation.json \
+  --feature-config configs/features.yaml \
+  --cache-root data/runtime-features \
+  --out runs/final \
+  --quality-gate runs/quality-gate.json \
+  --device-uuid GPU_UUID \
+  --json
+```
 
 ## Final evaluation and report
 

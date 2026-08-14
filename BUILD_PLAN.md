@@ -4,51 +4,44 @@
 
 This file is the implementation authority for LateSignal V1.
 An implementation agent should read the complete file before changing the repository.
-The project is currently an empty Git repository, so every path below is proposed rather than existing.
+The repository began empty, and the implemented paths now follow the authority defined below.
 The agent should implement milestones in order and should not change the final evaluation protocol after viewing final-period results.
 Every reported improvement must be supported by the locked protocol, paired uncertainty estimates, and equal-budget accounting described here.
 
 ### 1.1 Current implementation status
 
-This section is the durable handoff for continuing the build.
-It records completed gates and remaining evidence without weakening any milestone acceptance criterion.
+This section records completed gates and remaining work without weakening any milestone acceptance criterion.
 
 Milestones 0 through 6 are implemented and locally verified.
 They include the licensed-data boundary, inspected and prepared data pipeline, event-time simulator, shared model and offline references, delayed-label methods, credit schedulers, sealed evaluation, paired uncertainty, compute accounting, and aggregate report generation.
 
-Milestone 7 is implemented through the local launcher, detached tmux driver, resource watchdog, exact GPU identity binding, resumable stage evidence, selection graph, protocol lock, CUDA resume qualification, final matrix runner, aggregate collection boundary, and recovery controls.
-Milestone 7 is not complete because its real-data GPU acceptance gate has not run under the current final configuration.
+Milestone 7 has complete software paths for the 50-candidate selection graph, immutable pre-scoring protocol lock, CUDA checkpoint-resume qualification, 39-run final matrix, final aggregation, and aggregate-only collection manifest.
+Milestone 7 is not complete because the licensed real-data experiment has not passed on a qualified CUDA environment under the current final configuration.
 No final-period result has been scored or published.
 
-The checked-in resource authorization is now 89 runs, 25 GPU-hours, 26 GiB working disk, and 2 GiB retained aggregate evidence.
-A production-equivalent probe on the intended GPU under the preceding 4-hour and 25-GiB configuration measured a 24.1511-hour conservative upper projection and a 25.0726-GiB working-set projection for 500 steps per credit.
-Those measurements justify the new authored limits, but they are not passing evidence for the current protocol because changing the caps changes the final configuration and protocol hashes.
-A fresh probe from the current exact commit must pass and select 500 steps per credit before selection starts.
+The checked-in resource authorization is 89 runs, 25 GPU-hours, 26 GiB working disk, and 2 GiB retained aggregate evidence.
+These values remain hard ceilings rather than a claim that an arbitrary accelerator will finish the matrix.
+Every new execution environment must produce fresh feasibility evidence bound to its exact commit, dependency lock, prepared-data manifest, runtime, and GPU identity.
+Selection must not start unless feasibility model version 3 reports no blockers, enumerates 89 runs, passes every cap check, and selects the largest eligible steps-per-credit candidate.
 
-The remaining Milestone 7 sequence is:
+A fresh clone can continue with this resource-neutral sequence:
 
-1. Confirm that the intended GPU host is accessible and idle.
-2. Run `bash tools/run-gpu-feasibility.sh cuda-pm 1` from a clean checkout whose `HEAD` exactly matches `origin/main`.
-3. Require feasibility model version 3, no blockers, 89 total runs, every cap check true, and `selected_steps_per_credit` equal to 500.
-4. Run `bash tools/gpu-study.sh submit cuda-pm 1` only after that exact probe passes.
-5. Require all 50 selection candidates, the pre-scoring protocol lock, CUDA checkpoint-resume qualification, all 39 final runs, the aggregate manifest, and the aggregate-only collection manifest to complete.
-6. Collect with `bash tools/gpu-study.sh collect cuda-pm` and independently verify the collected manifest before reviewing any publication change.
+1. Install the locked environment with `uv sync --frozen --all-groups` and run `make check`.
+2. Review the dataset terms, fetch with explicit license acceptance, inspect, and prepare the data on permitted storage.
+3. Run `uv run latesignal protocol validate configs/experiments/final.yaml --out runs/feasibility/final.json --json` on the selected CUDA environment.
+4. Run the documented selection command with the feasibility-selected budget and retain its complete 36 + 8 + 6 candidate evidence.
+5. Create the protocol lock before any final-period scoring, run CUDA qualification, execute the 39-run final matrix, and aggregate the report through the public CLI.
+6. Verify the aggregate-only collection manifest and repository publication audit before committing any measured result.
 
-The current remote workflow does not automatically commit experimental results, push them, or delete prepared data on the GPU host.
-An earlier automatic publication and cleanup design was explicitly canceled before implementation.
-The detached study itself remains independent of the Mac after its started receipt, but result publication and any remote deletion remain separate reviewed actions.
+The exact public commands and identity checks are documented in [Reproducibility](docs/reproducibility.md).
+Raw data, prepared rows, license acknowledgements, checkpoints, ordinary runs, and machine-specific artifacts remain ignored and are not available from a clone.
 
 Milestone 8 is not complete.
 It requires the locked aggregate evidence from Milestone 7, truthful measured result tables, the final scheduler outcome, final methodology and limitations review, a clean-checkout reproduction exercise, and the publication audit.
 Until those gates pass, the repository must not claim a real-data result or a completed V1 study.
 
-The previous target-GPU probe artifact is intentionally ignored under `runs/feasibility/` and is not a protocol input for the next run.
-The prepared dataset and license acknowledgement are also intentionally ignored and must never be committed.
-
-The latest local handoff verification on 2026-08-14 ran `UV_CACHE_DIR=/private/tmp/uv-cache make check` successfully.
-Ruff formatting and lint passed, mypy passed across 116 source files, all 252 tests passed, and the repository audit reported zero findings across 227 tracked files.
-An independent prepared-data verification also rehashed all 7,639 manifest entries totaling 2,569,185,501 bytes and matched preparation manifest SHA-256 `33166b98db6c72ed4cfea7304d148ea92855087f335209668bef5ad28f3c91a0`.
-These are local software and data-integrity gates only and do not complete the pending target-GPU experiment.
+At this implementation checkpoint, `UV_CACHE_DIR=/private/tmp/uv-cache make check` passes formatting, Ruff lint, mypy across 116 source files, all 231 tests, and the repository audit with zero findings.
+The checked-in synthetic reproduction manifest was regenerated through the public experiment path and reproduces its exact ledgers, counts, and metrics.
 
 ## 2. Product definition
 
