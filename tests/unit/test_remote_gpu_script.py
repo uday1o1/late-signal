@@ -18,3 +18,12 @@ def test_remote_gpu_script_help_is_safe_and_bounded() -> None:
     assert "prepared dataset" in result.stdout
     assert "does not start" in result.stdout
     assert "source archive" in result.stdout
+
+
+def test_remote_gpu_script_uses_existing_https_credentials_without_reading_them() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+
+    assert "credential.helper=store" in source
+    assert "GIT_TERMINAL_PROMPT=0" in source
+    assert "cat ~/.git-credentials" not in source
+    assert "git@github.com:${origin_url#https://github.com/}" not in source

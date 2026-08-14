@@ -72,10 +72,10 @@ readonly ORIGIN_HEAD="$(git rev-parse origin/main)"
 origin_url="$(git remote get-url origin)"
 case "$origin_url" in
   https://github.com/*)
-    clone_url="git@github.com:${origin_url#https://github.com/}"
+    clone_url="$origin_url"
     ;;
   git@github.com:*)
-    clone_url="$origin_url"
+    clone_url="https://github.com/${origin_url#git@github.com:}"
     ;;
   *)
     die "origin must be a GitHub HTTPS or SSH URL"
@@ -108,13 +108,25 @@ min_memory_gb="$6"
 min_vram_mib="$7"
 
 if [[ ! -d "$remote_root/.git" ]]; then
-  git clone --branch main --single-branch "$clone_url" "$remote_root"
+  GIT_TERMINAL_PROMPT=0 git \
+    -c credential.helper= \
+    -c credential.helper=store \
+    clone \
+    --branch main \
+    --single-branch \
+    "$clone_url" \
+    "$remote_root"
 else
   [[ -z "$(git -C "$remote_root" status --porcelain)" ]] || {
     printf 'error: remote repository has uncommitted or untracked source changes\n' >&2
     exit 1
   }
-  git -C "$remote_root" fetch --prune origin main
+  git -C "$remote_root" remote set-url origin "$clone_url"
+  GIT_TERMINAL_PROMPT=0 git \
+    -c credential.helper= \
+    -c credential.helper=store \
+    -C "$remote_root" \
+    fetch --prune origin main
   git -C "$remote_root" checkout main
   git -C "$remote_root" merge --ff-only origin/main
 fi
