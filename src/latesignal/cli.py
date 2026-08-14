@@ -24,6 +24,7 @@ from latesignal.data.prepare import prepare_data
 from latesignal.errors import ExitCode, LateSignalError
 from latesignal.evaluation.runner import compare_run_dirs, evaluate_run_dir
 from latesignal.experiments.estimate import estimate_protocol
+from latesignal.experiments.production_aggregate_runner import run_production_aggregate
 from latesignal.experiments.production_final_runner import run_production_final
 from latesignal.experiments.production_selection_runner import run_production_selection
 from latesignal.experiments.protocol_lock import create_protocol_lock
@@ -184,6 +185,127 @@ def final_run_command(
             "completed_count": manifest["completed_count"],
             "online_runs": manifest["online_runs"],
             "offline_runs": manifest["offline_runs"],
+            "manifest_sha256": manifest["manifest_sha256"],
+        },
+        json_output,
+    )
+
+
+@final_app.command("aggregate")
+def final_aggregate_command(
+    config: Annotated[
+        Path,
+        typer.Argument(
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+            help="Authored final experiment configuration.",
+        ),
+    ],
+    protocol_lock: Annotated[
+        Path,
+        typer.Option(
+            "--protocol-lock",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+            help="Verified pre-scoring protocol lock.",
+        ),
+    ],
+    data_manifest: Annotated[
+        Path,
+        typer.Option(
+            "--data-manifest",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+            help="Verified prepared-data manifest.",
+        ),
+    ],
+    feature_config: Annotated[
+        Path,
+        typer.Option(
+            "--feature-config",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+            help="Authored click-time feature policy.",
+        ),
+    ],
+    cache_root: Annotated[
+        Path,
+        typer.Option(
+            "--cache-root",
+            file_okay=False,
+            dir_okay=True,
+            resolve_path=True,
+            help="Ignored content-addressed runtime feature-cache root.",
+        ),
+    ],
+    out: Annotated[
+        Path,
+        typer.Option(
+            "--out",
+            exists=True,
+            file_okay=False,
+            dir_okay=True,
+            readable=True,
+            resolve_path=True,
+            help="Completed ignored final-study output root.",
+        ),
+    ],
+    quality_gate: Annotated[
+        Path,
+        typer.Option(
+            "--quality-gate",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+            help="Passing locked qualification and leakage-gate receipt.",
+        ),
+    ],
+    device_uuid: Annotated[
+        str,
+        typer.Option(
+            "--device-uuid",
+            min=1,
+            help="Stable UUID of the sole CUDA device selected by the launcher.",
+        ),
+    ],
+    json_output: JsonOption = False,
+) -> None:
+    """Compute or resume exact paired uncertainty and aggregate-only reports."""
+
+    try:
+        manifest = run_production_aggregate(
+            config,
+            protocol_lock_path=protocol_lock,
+            data_manifest_path=data_manifest,
+            feature_config_path=feature_config,
+            cache_root=cache_root,
+            output_root=out,
+            quality_gate_path=quality_gate,
+            device_uuid=device_uuid,
+            repository=Path.cwd(),
+        )
+    except LateSignalError as error:
+        _fail(error, json_output)
+    _emit(
+        {
+            "ok": True,
+            "status": manifest["status"],
+            "out": str(out / "aggregate"),
+            "scheduler_outcome": manifest["scheduler_outcome"],
             "manifest_sha256": manifest["manifest_sha256"],
         },
         json_output,

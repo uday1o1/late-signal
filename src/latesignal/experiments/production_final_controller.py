@@ -5,11 +5,14 @@ from __future__ import annotations
 import copy
 import hashlib
 import math
+import resource
+import sys
 import time
 from pathlib import Path
 from typing import Any, Literal, Protocol, cast
 
 import numpy as np
+import torch
 from numpy.typing import NDArray
 from torch import Tensor, nn
 
@@ -397,6 +400,8 @@ class ProductionFinalController:
             "monitoring_prediction_seconds": 0.0,
             "checkpoint_seconds": 0.0,
             "snapshot_seconds": 0.0,
+            "peak_host_memory_bytes": 0,
+            "peak_accelerator_memory_bytes": 0,
             "feature_rows": 0,
             "truth_events": 0,
             "main_records": 0,
@@ -410,6 +415,21 @@ class ProductionFinalController:
             self._restore_latest()
         elif (self.output_root / "checkpoints" / "latest.json").exists():
             raise ConsistencyError("Existing final checkpoint requires resume mode")
+        if self.plan.device == "cuda" and torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
+
+    def _update_peak_memory(self) -> None:
+        resident = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+        if sys.platform != "darwin":
+            resident *= 1024
+        self.compute["peak_host_memory_bytes"] = max(
+            int(self.compute.get("peak_host_memory_bytes", 0)), resident
+        )
+        if self.plan.device == "cuda" and torch.cuda.is_available():
+            accelerator = int(torch.cuda.max_memory_allocated())
+            self.compute["peak_accelerator_memory_bytes"] = max(
+                int(self.compute.get("peak_accelerator_memory_bytes", 0)), accelerator
+            )
 
     @property
     def _main_method(self) -> PackedDelayedMethod | _PackedOracleReference:
@@ -894,6 +914,7 @@ class ProductionFinalController:
         if not self.initialization_complete or self.initialization_trainer is not None:
             raise ConsistencyError("Final checkpoint preceded compact shared initialization")
         started = time.perf_counter()
+        self._update_peak_memory()
         self.checkpoints.write(
             self.checkpoint_identity,
             self._state(next_boundary_index=next_boundary_index),
@@ -1271,6 +1292,7 @@ class ProductionFinalController:
                 for model in (self.auxiliary.q_tn.model, self.auxiliary.q_dp.model)
                 for parameter in model.parameters()
             )
+        self._update_peak_memory()
         manifest: dict[str, object] = {
             "version": 1,
             "status": "complete",
