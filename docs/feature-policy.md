@@ -27,3 +27,12 @@ Prepared feature files and truth files have different explicit Arrow schemas and
 Feature Parquet files contain no final label, conversion delay, reveal time, or maturity time.
 Positive truth is partitioned by reveal day and negative truth by maturity day.
 Learner-facing code receives legal typed records from the oracle rather than opening truth files directly.
+
+## Observed preparation evidence
+
+The reviewed official corpus produced 15,924,859 feature rows and 15,924,859 truth rows.
+The truth store contains 1,718,566 positive reveals and 14,206,293 negative maturities.
+The preparation manifest inventories 7,639 published Parquet files totaling 2,569,185,501 bytes, and an independent verification rehashed every file successfully.
+The feature store spans normalized click days 0 through 90 and contains no `Sale`, `SalesAmountInEuro`, `time_delay_for_conversion`, `final_label`, or `available_at_seconds` column.
+The locked experimental protocol uses click days 0 through 89 and does not silently reinterpret the observed extra boundary day.
+Independent scans found zero disagreements between `cold_user` and zero prior-user clicks and zero disagreements between `cold_product` and zero prior-product clicks.

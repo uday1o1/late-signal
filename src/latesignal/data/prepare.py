@@ -291,11 +291,19 @@ def _write_quarantine_parquet(source: Path, destination: Path) -> int:
     return count
 
 
-def _file_inventory(root: Path) -> list[dict[str, object]]:
+def _file_inventory(root: Path, published_roots: tuple[Path, ...]) -> list[dict[str, object]]:
     inventory: list[dict[str, object]] = []
-    for path in sorted(root.rglob("*.parquet")):
-        sha256, size = sha256_file(path)
-        inventory.append({"path": str(path.relative_to(root)), "sha256": sha256, "bytes": size})
+    for published_root in published_roots:
+        for path in sorted(published_root.rglob("*.parquet")):
+            sha256, size = sha256_file(path)
+            inventory.append(
+                {
+                    "path": str(path.relative_to(root)),
+                    "sha256": sha256,
+                    "bytes": size,
+                }
+            )
+    inventory.sort(key=lambda item: str(item["path"]))
     return inventory
 
 
@@ -496,7 +504,10 @@ def prepare_data(
         )
         if quarantine_count != quarantined_expected:
             raise ConsistencyError("Prepared quarantine count does not match inspection")
-        inventory = _file_inventory(stage)
+        inventory = _file_inventory(
+            stage,
+            (feature_root, stage / "truth", stage / "quarantine"),
+        )
         manifest: dict[str, Any] = {
             "manifest_version": 1,
             "code_version": __version__,

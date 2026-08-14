@@ -259,10 +259,14 @@ def test_prepare_external_sorts_an_unsorted_source(
         float(100 + 44 * 86_400),
         float(100 + 89 * 86_400),
     ]
-    streaming = read_json(processed / "manifests" / "preparation.json")["streaming"]
+    preparation = read_json(processed / "manifests" / "preparation.json")
+    streaming = preparation["streaming"]
     assert streaming["source_click_time_monotonic"] is False
     assert streaming["chronological_sort"] == {
         "applied": True,
         "engine": "streaming",
         "keys": ["click_timestamp", "raw_row_index"],
     }
+    inventory_paths = [item["path"] for item in preparation["files"]]
+    assert "accepted-chronological.parquet" not in inventory_paths
+    assert all((processed / path).is_file() for path in inventory_paths)
