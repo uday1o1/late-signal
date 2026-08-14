@@ -95,6 +95,22 @@ class PredictionSeal:
     ordered_id_sha256: str
 
 
+@dataclass(frozen=True, slots=True)
+class PredictionLedgerPosition:
+    parts: int
+    rows: int
+    ordered_id_sha256: str
+    files_sha256: str
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "parts": self.parts,
+            "rows": self.rows,
+            "ordered_id_sha256": self.ordered_id_sha256,
+            "files_sha256": self.files_sha256,
+        }
+
+
 def ordered_click_id_sha256(click_ids: Sequence[str]) -> str:
     digest = hashlib.sha256()
     for click_id in click_ids:
@@ -127,6 +143,20 @@ class PredictionLedgerWriter:
         else:
             write_json_atomic(identity_path, identity.model_dump(mode="json"))
         self._remove_temporary_parts()
+        self._validate_names()
+
+    def _validate_names(self) -> None:
+        allowed = {"identity.json", "seal.json"}
+        unexpected = sorted(
+            path.name
+            for path in self.root.iterdir()
+            if path.name not in allowed and _PART.fullmatch(path.name) is None
+        )
+        if unexpected:
+            raise ConsistencyError(
+                "Prediction ledger contains an unexpected artifact",
+                details={"paths": unexpected},
+            )
 
     def _remove_temporary_parts(self) -> None:
         for path in self.root.iterdir():
@@ -153,6 +183,7 @@ class PredictionLedgerWriter:
     def append(
         self,
         *,
+        part_index: int,
         click_ids: Sequence[str],
         click_days: Sequence[int],
         probabilities: Sequence[float],
@@ -160,6 +191,8 @@ class PredictionLedgerWriter:
     ) -> Path:
         if (self.root / "seal.json").exists():
             raise ConsistencyError("Sealed prediction ledger is immutable")
+        if isinstance(part_index, bool) or not isinstance(part_index, int) or part_index < 0:
+            raise ConsistencyError("Prediction part index is invalid")
         lengths = {len(click_ids), len(click_days), len(probabilities), len(model_versions)}
         if lengths == {0} or len(lengths) != 1:
             raise ConsistencyError("Prediction columns must be nonempty and aligned")
@@ -195,8 +228,18 @@ class PredictionLedgerWriter:
             ],
             schema=_SCHEMA,
         )
-        index = len(self._parts())
-        target = self.root / f"part-{index:06d}.parquet"
+        parts = self._parts()
+        target = self.root / f"part-{part_index:06d}.parquet"
+        if part_index < len(parts):
+            try:
+                existing = pq.ParquetFile(target).read()
+            except (OSError, pa.ArrowException) as error:
+                raise ConsistencyError("Prediction retry part could not be verified") from error
+            if not existing.equals(table, check_metadata=True):
+                raise ConsistencyError("Retried prediction part differs from durable evidence")
+            return target
+        if part_index != len(parts):
+            raise ConsistencyError("Prediction parts must be appended contiguously")
         temporary = self.root / f".{target.name}.tmp"
         try:
             pq.write_table(
@@ -219,8 +262,6 @@ class PredictionLedgerWriter:
 
     def _scan(self) -> dict[str, object]:
         parts = self._parts()
-        if not parts:
-            raise ConsistencyError("Prediction ledger has no parts")
         ordered_ids = hashlib.sha256()
         seen_ids: set[bytes] = set()
         rows = 0
@@ -273,6 +314,25 @@ class PredictionLedgerWriter:
             "ordered_id_sha256": ordered_ids.hexdigest(),
             "files": files,
         }
+
+    def position(self) -> PredictionLedgerPosition:
+        scan = self._scan()
+        files = scan["files"]
+        rows = scan["rows"]
+        ordered_id_sha256 = scan["ordered_id_sha256"]
+        if (
+            not isinstance(files, list)
+            or isinstance(rows, bool)
+            or not isinstance(rows, int)
+            or not isinstance(ordered_id_sha256, str)
+        ):
+            raise ConsistencyError("Prediction scan produced an invalid position")
+        return PredictionLedgerPosition(
+            parts=len(files),
+            rows=rows,
+            ordered_id_sha256=ordered_id_sha256,
+            files_sha256=hashlib.sha256(canonical_json_bytes(files)).hexdigest(),
+        )
 
     def seal(self) -> PredictionSeal:
         seal_path = self.root / "seal.json"

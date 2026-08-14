@@ -37,8 +37,15 @@ def _identity(
     )
 
 
-def _append(writer: PredictionLedgerWriter, click_ids: list[str], *, day: int = 65) -> None:
+def _append(
+    writer: PredictionLedgerWriter,
+    click_ids: list[str],
+    *,
+    part_index: int,
+    day: int = 65,
+) -> None:
     writer.append(
+        part_index=part_index,
         click_ids=click_ids,
         click_days=[day] * len(click_ids),
         probabilities=[0.25 + index / 10.0 for index in range(len(click_ids))],
@@ -50,9 +57,9 @@ def test_prediction_ledger_resumes_then_seals_without_truth(tmp_path: Path) -> N
     click_ids = _ids(4)
     identity = _identity(click_ids)
     root = tmp_path / "predictions"
-    _append(PredictionLedgerWriter(root, identity), click_ids[:2])
+    _append(PredictionLedgerWriter(root, identity), click_ids[:2], part_index=0)
     resumed = PredictionLedgerWriter(root, identity)
-    _append(resumed, click_ids[2:], day=66)
+    _append(resumed, click_ids[2:], part_index=1, day=66)
 
     sealed = resumed.seal()
     verified = PredictionLedgerWriter(root, identity).verify_seal()
@@ -61,13 +68,13 @@ def test_prediction_ledger_resumes_then_seals_without_truth(tmp_path: Path) -> N
     assert sealed.seal_sha256 == verified.seal_sha256
     assert sealed.ordered_id_sha256 == ordered_click_id_sha256(click_ids)
     with pytest.raises(ConsistencyError, match="immutable"):
-        _append(resumed, _ids(1))
+        _append(resumed, _ids(1), part_index=2)
 
 
 def test_prediction_seal_refuses_partial_or_duplicate_cohort(tmp_path: Path) -> None:
     click_ids = _ids(3)
     partial = PredictionLedgerWriter(tmp_path / "partial", _identity(click_ids))
-    _append(partial, click_ids[:2])
+    _append(partial, click_ids[:2], part_index=0)
     with pytest.raises(ConsistencyError, match="locked evaluation cohort"):
         partial.seal()
 
@@ -76,7 +83,7 @@ def test_prediction_seal_refuses_partial_or_duplicate_cohort(tmp_path: Path) -> 
         tmp_path / "duplicate",
         _identity(duplicate_ids),
     )
-    _append(duplicate, duplicate_ids)
+    _append(duplicate, duplicate_ids, part_index=0)
     with pytest.raises(ConsistencyError, match="duplicate click ID"):
         duplicate.seal()
 
@@ -84,7 +91,7 @@ def test_prediction_seal_refuses_partial_or_duplicate_cohort(tmp_path: Path) -> 
 def test_prediction_seal_detects_file_tampering(tmp_path: Path) -> None:
     click_ids = _ids(2)
     writer = PredictionLedgerWriter(tmp_path / "predictions", _identity(click_ids))
-    _append(writer, click_ids)
+    _append(writer, click_ids, part_index=0)
     writer.seal()
     part = next(writer.root.glob("part-*.parquet"))
     part.write_bytes(b"not parquet")
@@ -120,3 +127,20 @@ def test_prediction_identity_enforces_selection_and_budget_boundaries() -> None:
                 }
             ).model_dump()
         )
+
+
+def test_prediction_append_is_retry_safe_and_contiguous(tmp_path: Path) -> None:
+    click_ids = _ids(3)
+    writer = PredictionLedgerWriter(tmp_path / "predictions", _identity(click_ids))
+    _append(writer, click_ids[:2], part_index=0)
+    expected_position = writer.position()
+
+    _append(writer, click_ids[:2], part_index=0)
+    assert writer.position() == expected_position
+    with pytest.raises(ConsistencyError, match="differs"):
+        _append(writer, click_ids[1:], part_index=0)
+    with pytest.raises(ConsistencyError, match="contiguously"):
+        _append(writer, click_ids[2:], part_index=2)
+    _append(writer, click_ids[2:], part_index=1, day=66)
+    assert writer.position().parts == 2
+    assert writer.position().rows == 3
