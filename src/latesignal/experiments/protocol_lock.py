@@ -21,6 +21,7 @@ from latesignal.data.manifests import (
     sha256_file,
     write_json_atomic,
 )
+from latesignal.data.prepared import verify_prepared_inventory
 from latesignal.errors import ConfigurationError, ConsistencyError
 from latesignal.experiments.estimate import enumerate_matrix
 
@@ -103,55 +104,13 @@ def selection_decisions(results: SelectionResults) -> dict[str, object]:
 
 
 def _verify_prepared_data(manifest_path: Path) -> dict[str, object]:
-    manifest = read_json(manifest_path)
-    rows = manifest.get("rows")
-    numeric = manifest.get("numeric_statistics")
-    files = manifest.get("files")
-    if (
-        manifest.get("manifest_version") != 1
-        or not isinstance(rows, dict)
-        or rows.get("reconciled") is not True
-        or not isinstance(numeric, dict)
-        or numeric.get("fit_click_days") != [0, 14]
-        or not isinstance(files, list)
-    ):
-        raise ConsistencyError("Prepared-data manifest does not meet the final lock contract")
-    data_root = manifest_path.parent.parent.resolve()
-    verified = 0
-    total_bytes = 0
-    for item in files:
-        if not isinstance(item, dict):
-            raise ConsistencyError("Prepared-data inventory contains a malformed entry")
-        relative = item.get("path")
-        expected_sha256 = item.get("sha256")
-        expected_bytes = item.get("bytes")
-        if (
-            not isinstance(relative, str)
-            or not isinstance(expected_sha256, str)
-            or isinstance(expected_bytes, bool)
-            or not isinstance(expected_bytes, int)
-        ):
-            raise ConsistencyError("Prepared-data inventory entry has invalid fields")
-        candidate = (data_root / relative).resolve()
-        try:
-            candidate.relative_to(data_root)
-        except ValueError as error:
-            raise ConsistencyError("Prepared-data inventory path escapes its root") from error
-        actual_sha256, actual_bytes = sha256_file(candidate)
-        if actual_sha256 != expected_sha256 or actual_bytes != expected_bytes:
-            raise ConsistencyError(
-                "Prepared-data file identity does not match its manifest",
-                details={"path": relative},
-            )
-        verified += 1
-        total_bytes += actual_bytes
-    manifest_sha256, manifest_bytes = sha256_file(manifest_path)
+    inventory = verify_prepared_inventory(manifest_path)
     return {
-        "manifest_path": str(manifest_path.resolve().relative_to(data_root)),
-        "manifest_sha256": manifest_sha256,
-        "manifest_bytes": manifest_bytes,
-        "verified_files": verified,
-        "verified_file_bytes": total_bytes,
+        "manifest_path": str(inventory.manifest_path.relative_to(inventory.root)),
+        "manifest_sha256": inventory.manifest_sha256,
+        "manifest_bytes": inventory.manifest_bytes,
+        "verified_files": len(inventory.files),
+        "verified_file_bytes": inventory.total_bytes,
     }
 
 
