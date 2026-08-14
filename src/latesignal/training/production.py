@@ -141,6 +141,12 @@ class PackedConversionTrainer:
         )
         self.budget = BudgetCounter()
         self.model_version = 0
+        self._cpu_rng_state = torch.get_rng_state().clone()
+        self._cuda_rng_state = (
+            [value.clone() for value in torch.cuda.get_rng_state_all()]
+            if self.device.type == "cuda"
+            else []
+        )
 
     @classmethod
     def create(
@@ -163,6 +169,16 @@ class PackedConversionTrainer:
             raise ConsistencyError("Packed training target batch has an invalid shape")
         return features, targets
 
+    def _activate_rng(self) -> None:
+        torch.set_rng_state(self._cpu_rng_state)
+        if self.device.type == "cuda":
+            torch.cuda.set_rng_state_all(self._cuda_rng_state)
+
+    def _capture_rng(self) -> None:
+        self._cpu_rng_state = torch.get_rng_state().clone()
+        if self.device.type == "cuda":
+            self._cuda_rng_state = [value.clone() for value in torch.cuda.get_rng_state_all()]
+
     def spend_credit(
         self,
         *,
@@ -177,6 +193,7 @@ class PackedConversionTrainer:
         exposure_sources = np.empty(examples, dtype=np.uint8)
         exposure_weights = np.empty(examples, dtype=np.float32)
         loss_sum = 0.0
+        self._activate_rng()
         self.model.train()
         for step in range(self.config.steps_per_credit):
             sample = sampler.sample(
@@ -213,6 +230,7 @@ class PackedConversionTrainer:
             exposure_weights[start:end] = weights.detach().cpu().numpy()
             loss_sum += float(loss.detach().cpu().item())
             self.model_version += 1
+        self._capture_rng()
         self.budget.record_credit(
             steps=self.config.steps_per_credit,
             batch_size=self.config.batch_size,
@@ -244,9 +262,6 @@ class PackedConversionTrainer:
         return np.asarray(probabilities.cpu().numpy(), dtype=np.float32)
 
     def state_dict(self) -> dict[str, object]:
-        cuda_rng: list[Tensor] = []
-        if self.device.type == "cuda":
-            cuda_rng = torch.cuda.get_rng_state_all()
         return {
             "version": 1,
             "config_sha256": self.config.canonical_sha256,
@@ -256,8 +271,8 @@ class PackedConversionTrainer:
             "optimizer": _snapshot_state(self.optimizer.state_dict()),
             "budget": self.budget.state_dict(),
             "model_version": self.model_version,
-            "cpu_rng_state": torch.get_rng_state(),
-            "cuda_rng_state": cuda_rng,
+            "cpu_rng_state": self._cpu_rng_state.clone(),
+            "cuda_rng_state": [value.clone() for value in self._cuda_rng_state],
         }
 
     def load_state_dict(self, state: dict[str, Any]) -> None:
@@ -296,6 +311,5 @@ class PackedConversionTrainer:
         self.model_version = model_version
         if self.model_version != self.budget.optimizer_steps:
             raise ConsistencyError("Production model version does not match optimizer steps")
-        torch.set_rng_state(cpu_rng_state.cpu())
-        if self.device.type == "cuda":
-            torch.cuda.set_rng_state_all(cuda_rng_state)
+        self._cpu_rng_state = cpu_rng_state.cpu().clone()
+        self._cuda_rng_state = [value.cpu().clone() for value in cuda_rng_state]

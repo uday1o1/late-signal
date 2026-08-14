@@ -42,6 +42,12 @@ class MethodBoundaryResult:
 
 
 @dataclass(frozen=True, slots=True)
+class DFMObservationBatch:
+    targets: NDArray[np.float32]
+    time_days: NDArray[np.float32]
+
+
+@dataclass(frozen=True, slots=True)
 class _PendingRecords:
     refs: list[NDArray[np.int32]]
     available: list[NDArray[np.float64]]
@@ -327,6 +333,33 @@ class PackedDelayedMethod:
             main_records=0 if batch is None else len(batch),
             q_tn_records=q_tn_records,
             q_dp_records=q_dp_records,
+        )
+
+    def dfm_observations(
+        self,
+        refs: NDArray[np.int32],
+        *,
+        simulator_time: float,
+    ) -> DFMObservationBatch:
+        if self.name != "dfm":
+            raise ConsistencyError("Only DFM can materialize current censored observations")
+        parsed = np.asarray(refs, dtype=np.int32)
+        if (
+            parsed.ndim != 1
+            or np.any(parsed < 0)
+            or np.any(parsed >= self.click_cursor)
+            or np.any(self.click_times[parsed] > simulator_time)
+        ):
+            raise ConsistencyError("DFM sample contains a future or unknown click")
+        positive = self.outcome_state[parsed] == _POSITIVE
+        elapsed = np.minimum(
+            (simulator_time - self.click_times[parsed]) / SECONDS_PER_DAY,
+            self.attribution_seconds / SECONDS_PER_DAY,
+        ).astype(np.float32)
+        times = np.where(positive, self.positive_delay_days[parsed], elapsed).astype(np.float32)
+        return DFMObservationBatch(
+            targets=positive.astype(np.float32),
+            time_days=times,
         )
 
     def state_dict(self) -> dict[str, object]:

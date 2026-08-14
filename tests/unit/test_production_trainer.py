@@ -148,3 +148,39 @@ def test_production_trainer_rejects_noncontiguous_credit_and_cuda_without_contra
     monkeypatch.delenv("CUBLAS_WORKSPACE_CONFIG", raising=False)
     with pytest.raises(ConfigurationError, match="CUBLAS_WORKSPACE_CONFIG"):
         require_training_device("cuda")
+
+
+def test_production_trainers_keep_independent_dropout_rng_streams() -> None:
+    features = _Features(64)
+    config = _config(dropout=0.1)
+    interleaved = PackedConversionTrainer.create(features, config, seed=41, device="cpu")
+    auxiliary = PackedConversionTrainer.create(features, config, seed=1041, device="cpu")
+    control = PackedConversionTrainer.create(features, config, seed=41, device="cpu")
+    interleaved_sampler = _sampler(_store())
+    auxiliary_sampler = _sampler(_store())
+    control_sampler = _sampler(_store())
+
+    interleaved.spend_credit(
+        credit_id=0,
+        decision_time=64.0,
+        sampler=interleaved_sampler,
+    )
+    auxiliary.spend_credit(
+        credit_id=0,
+        decision_time=64.0,
+        sampler=auxiliary_sampler,
+    )
+    interleaved.spend_credit(
+        credit_id=1,
+        decision_time=64.0,
+        sampler=interleaved_sampler,
+    )
+    control.spend_credit(credit_id=0, decision_time=64.0, sampler=control_sampler)
+    control.spend_credit(credit_id=1, decision_time=64.0, sampler=control_sampler)
+
+    np.testing.assert_allclose(
+        interleaved.predict(np.arange(8)),
+        control.predict(np.arange(8)),
+        rtol=0,
+        atol=0,
+    )
