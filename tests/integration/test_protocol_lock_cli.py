@@ -217,7 +217,8 @@ def test_public_protocol_lock_hashes_selection_data_code_and_environment(tmp_pat
     payload = json.loads(result.stdout)
     lock = verify_protocol_lock(output)
     assert payload["lock_sha256"] == lock["lock_sha256"]
-    assert lock["publication_eligible"] is False
+    assert lock["publication_eligible"] is (not lock["git"]["dirty"])
+    assert lock["git"]["allow_dirty_override"] is lock["git"]["dirty"]
     assert lock["selection_decisions"]["model"]["config_sha256"] == _digest("model-1")
     assert lock["data"]["verified_files"] == 1
     assert lock["final_seeds"] == [17, 41, 73]
