@@ -31,7 +31,7 @@ pilot:
   temporary_margin_gb: 5.0
   assumed_host_memory_gb: 16.0
 caps:
-  max_runs: null
-  max_gpu_hours: null
-  max_working_disk_gb: null
-  max_retained_disk_gb: null
+  max_runs: 89
+  max_gpu_hours: 4.0
+  max_working_disk_gb: 25.0
+  max_retained_disk_gb: 2.0

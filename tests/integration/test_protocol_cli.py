@@ -50,7 +50,6 @@ def test_public_protocol_validation_reports_exact_external_blockers(
     assert payload["matrix"]["total_online_credits"] == 1_883
     assert payload["selected_steps_per_credit"] is None
     assert set(payload["blockers"]) == {
-        "USER_RESOURCE_CAPS_REQUIRED",
         "REQUESTED_ACCELERATOR_UNAVAILABLE",
         "REAL_DATA_PILOT_REQUIRED",
         "NO_STEPS_PER_CREDIT_CANDIDATE_FITS_CAPS",

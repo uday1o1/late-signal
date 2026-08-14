@@ -130,8 +130,8 @@ Estimate it with:
 uv run latesignal protocol estimate configs/experiments/final.yaml --json
 ```
 
-The checked-in final configuration intentionally leaves machine-specific resource caps unset.
-Validation remains blocked until the actual CUDA machine caps and real prepared-data pilot are available.
+The checked-in final configuration records the authorized 89-run, 4 GPU-hour, 25 GiB working-disk, and 2 GiB retained-artifact caps measured for the qualified workstation.
+Strict validation passes only on that CUDA-class machine with the verified prepared data available; a CPU-only environment remains blocked.
 See [Experimental protocol](docs/experimental-protocol.md) for feasibility, selection, protocol-lock, and uncertainty rules.
 
 ## Render an aggregate report

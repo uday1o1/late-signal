@@ -52,15 +52,15 @@ An active run reserves three full checkpoint copies for the current checkpoint, 
 After a completed run's sealed predictions and aggregate evidence are verified, its restricted row-level checkpoints and intermediate ledgers are pruned rather than treated as publishable retained artifacts.
 Only aggregate tables, manifests, and hashes contribute to retained artifact storage.
 
-The final configuration deliberately leaves these user and machine specific caps unset:
+The final configuration records the resource caps authorized after qualification on the intended workstation:
 
-- Maximum total runs.
-- Maximum GPU hours.
-- Maximum working disk in GiB.
-- Maximum retained artifact disk in GiB.
+- 89 total runs.
+- 4 GPU-hours.
+- 25 GiB working disk.
+- 2 GiB retained artifact storage.
 
-All four values must describe the actual final-run machine and storage budget.
-An unset cap is a failing gate, not an unlimited budget.
+These values describe the actual final-run machine and storage budget rather than unlimited resources.
+Changing the machine or authorized budget requires new feasibility evidence and a new protocol hash.
 The final gate also fails when the requested accelerator is unavailable, the required real-data pilot is unavailable, or no steps-per-credit candidate fits.
 
 Run strict validation after supplying caps and making the prepared data and accelerator available:
