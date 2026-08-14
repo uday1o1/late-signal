@@ -13,7 +13,7 @@ readonly GPU_ACCOUNTING_RESERVE_SECONDS=120
 
 usage() {
   cat <<'EOF'
-Usage: tools/run-gpu-study-remote.sh REPO_ROOT JOB_ROOT GPU_UUID EXPECTED_COMMIT LAUNCH_ID [PRIOR_GPU_SECONDS]
+Usage: tools/run-gpu-study-remote.sh REPO_ROOT JOB_ROOT GPU_UUID EXPECTED_COMMIT LAUNCH_ID [PRIOR_GPU_SECONDS [MODE [DRIVER_COMMIT]]]
 
 Internal commit-pinned driver for LateSignal's one-shot GPU study.
 Use tools/gpu-study.sh from the submitting Mac instead of invoking this
@@ -31,7 +31,7 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
   exit 0
 fi
 
-(( $# == 5 || $# == 6 )) || {
+(( $# >= 5 && $# <= 8 )) || {
   usage >&2
   exit 2
 }
@@ -42,7 +42,11 @@ readonly GPU_UUID="$3"
 readonly EXPECTED_COMMIT="$4"
 readonly LAUNCH_ID="$5"
 readonly IMPORTED_GPU_SECONDS="${6:-0}"
+readonly EXECUTION_MODE="${7:-full}"
+readonly DRIVER_COMMIT="${8:-$EXPECTED_COMMIT}"
 readonly COMMIT_SHORT="${EXPECTED_COMMIT:0:12}"
+readonly SCRIPT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+readonly DRIVER_ROOT="$([[ "$EXECUTION_MODE" == "full" ]] && printf '%s' "$REPO_ROOT" || printf '%s' "$SCRIPT_ROOT")"
 readonly CACHE_ROOT="$JOB_ROOT/runtime-cache"
 readonly DATA_MANIFEST="$REPO_ROOT/data/processed/manifests/preparation.json"
 readonly FINAL_CONFIG="$REPO_ROOT/configs/experiments/final.yaml"
@@ -64,8 +68,11 @@ readonly UV_BIN="$UV_ENVIRONMENT/bin/uv"
   die "job root is not the exact commit-scoped directory"
 [[ "$GPU_UUID" =~ ^GPU-[A-Za-z0-9-]+$ ]] || die "GPU UUID is malformed"
 [[ "$EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]] || die "expected commit is malformed"
+[[ "$DRIVER_COMMIT" =~ ^[0-9a-f]{40}$ ]] || die "driver commit is malformed"
 [[ "$LAUNCH_ID" =~ ^[A-Za-z0-9-]+$ ]] || die "launch ID is malformed"
 [[ "$IMPORTED_GPU_SECONDS" =~ ^[0-9]+$ ]] || die "prior GPU accounting is malformed"
+[[ "$EXECUTION_MODE" == "full" || "$EXECUTION_MODE" == "final-recovery" ]] || \
+  die "execution mode is invalid"
 [[ -f "$DATA_MANIFEST" && -f "$FINAL_CONFIG" && -f "$FEATURE_CONFIG" ]] || \
   die "required repository inputs are missing"
 [[ ! -L "$JOB_ROOT" ]] || die "job root cannot be a symbolic link"
@@ -84,6 +91,7 @@ for protected_path in \
   "$PROTOCOL_LOCK" \
   "$QUALITY_GATE" \
   "$FINAL_ROOT" \
+  "$JOB_ROOT/final-recovery-provenance.json" \
   "$JOB_ROOT/collection-manifest.json"; do
   [[ ! -L "$protected_path" ]] || die "a protected job path is a symbolic link"
 done
@@ -93,6 +101,24 @@ exec >>"$LOG_PATH" 2>&1
 cd "$REPO_ROOT"
 [[ "$(git rev-parse HEAD)" == "$EXPECTED_COMMIT" ]] || die "remote commit changed"
 [[ -z "$(git status --porcelain --untracked-files=all)" ]] || die "remote tree is dirty"
+if [[ "$EXECUTION_MODE" == "full" ]]; then
+  [[ "$DRIVER_ROOT" == "$REPO_ROOT" && "$DRIVER_COMMIT" == "$EXPECTED_COMMIT" ]] || \
+    die "full execution must use its commit-pinned driver"
+  [[ "$(git rev-parse HEAD)" == "$DRIVER_COMMIT" ]] || die "remote driver commit changed"
+  [[ -z "$(git status --porcelain --untracked-files=all)" ]] || \
+    die "remote driver tree is dirty"
+else
+  [[ "$DRIVER_ROOT" != "$REPO_ROOT" && "$DRIVER_COMMIT" != "$EXPECTED_COMMIT" ]] || \
+    die "final recovery must keep tooling outside the scientific worktree"
+  [[ "$(git -C "$DRIVER_ROOT" rev-parse HEAD)" == "$DRIVER_COMMIT" ]] || \
+    die "remote driver commit changed"
+  [[ -z "$(git -C "$DRIVER_ROOT" status --porcelain --untracked-files=all)" ]] || \
+    die "remote driver tree is dirty"
+  python3 "$DRIVER_ROOT/tools/prepare-final-resume.py" \
+    verify "$JOB_ROOT" "$EXPECTED_COMMIT" "$DRIVER_COMMIT" "$GPU_UUID" "$LAUNCH_ID"
+  [[ -x "$UV_BIN" && -d "$REPO_ROOT/.venv" ]] || \
+    die "locked execution environment is missing"
+fi
 
 export CUDA_VISIBLE_DEVICES="$GPU_UUID"
 export CUBLAS_WORKSPACE_CONFIG=":4096:8"
@@ -176,18 +202,7 @@ watchdog_stop() {
 }
 
 working_kib() {
-  local paths=()
-  local candidate
-  for candidate in "$REPO_ROOT/.venv" "$REPO_ROOT/data/processed" "$JOB_ROOT"; do
-    if [[ -e "$candidate" ]]; then
-      paths+=("$candidate")
-    fi
-  done
-  (( ${#paths[@]} > 0 )) || {
-    printf '0\n'
-    return
-  }
-  timeout 60s du -sk -- "${paths[@]}" | awk '{total += $1} END {print total + 0}'
+  bash "$DRIVER_ROOT/tools/measure-gpu-study-working-set.sh" "$REPO_ROOT" "$JOB_ROOT"
 }
 
 watchdog() {
@@ -306,15 +321,24 @@ mkdir -p "$GPU_LOCK_ROOT"
 readonly GPU_LOCK_PATH="$GPU_LOCK_ROOT/gpu-$GPU_UUID.lock"
 [[ ! -L "$GPU_LOCK_PATH" ]] || die "GPU lock file cannot be a symbolic link"
 exec 8>"$GPU_LOCK_PATH"
-flock -n 8 || die "another LateSignal process owns the selected GPU lock"
+flock -n 8 || {
+  resource_failure "prestart_gpu_lock_race"
+  die "another LateSignal process owns the selected GPU lock"
+}
 exec 9>"$JOB_ROOT/job.lock"
 flock -n 9 || die "another process owns this exact one-shot job"
 
-initial_compute_pids="$(
-  nvidia-smi --id="$GPU_UUID" --query-compute-apps=pid \
+if ! initial_compute_pids="$(
+  timeout 10s nvidia-smi --id="$GPU_UUID" --query-compute-apps=pid \
     --format=csv,noheader,nounits 2>/dev/null | sed '/^[[:space:]]*$/d'
-)"
-[[ -z "$initial_compute_pids" ]] || die "selected GPU became occupied before launch"
+)"; then
+  resource_failure "prestart_gpu_signal_lost"
+  die "selected GPU process signal was unavailable before launch"
+fi
+[[ -z "$initial_compute_pids" ]] || {
+  resource_failure "prestart_gpu_occupancy_race"
+  die "selected GPU became occupied before launch"
+}
 
 started_temporary="$JOB_ROOT/.started.$MAIN_PID.tmp"
 printf '%s\n' \
@@ -560,6 +584,74 @@ run_aggregate() {
     --json
 }
 
+verify_final_recovery() {
+  python3 "$DRIVER_ROOT/tools/prepare-final-resume.py" \
+    verify "$JOB_ROOT" "$EXPECTED_COMMIT" "$DRIVER_COMMIT" "$GPU_UUID" "$LAUNCH_ID"
+  python3 "$REPO_ROOT/tools/prepare-selection-resume.py" \
+    verify "$JOB_ROOT" "$EXPECTED_COMMIT"
+  "$UV_BIN" run python - \
+    "$PROTOCOL_LOCK" \
+    "$QUALITY_GATE" \
+    "$SELECTION_RESULTS" \
+    "$FEASIBILITY" \
+    "$FINAL_CONFIG" \
+    "$DATA_MANIFEST" \
+    "$REPO_ROOT" <<'PY'
+import hashlib
+import sys
+from pathlib import Path
+
+from latesignal.contracts.selection import SelectionResults
+from latesignal.data.manifests import canonical_json_bytes, read_json, sha256_file
+from latesignal.experiments.protocol_lock import (
+    selection_decisions,
+    verify_locked_final_runtime,
+    verify_protocol_lock,
+)
+
+lock = verify_protocol_lock(Path(sys.argv[1]))
+quality = read_json(Path(sys.argv[2]))
+selection_path = Path(sys.argv[3])
+selection = SelectionResults.model_validate(read_json(selection_path))
+feasibility = read_json(Path(sys.argv[4]))
+verify_locked_final_runtime(
+    lock,
+    final_config_path=Path(sys.argv[5]),
+    data_manifest_path=Path(sys.argv[6]),
+    repository=Path(sys.argv[7]),
+)
+selection_sha256, _ = sha256_file(selection_path)
+feasibility_sha256 = hashlib.sha256(canonical_json_bytes(feasibility)).hexdigest()
+if (
+    lock.get("status") != "locked"
+    or lock.get("publication_eligible") is not True
+    or quality.get("status") != "passed"
+    or quality.get("protocol_lock_sha256") != lock.get("lock_sha256")
+    or quality.get("protocol_sha256") != lock.get("protocol_sha256")
+    or selection.protocol_sha256 != lock.get("protocol_sha256")
+    or selection_sha256 != lock.get("selection_file_sha256")
+    or selection_decisions(selection) != lock.get("selection_decisions")
+    or feasibility_sha256 != lock.get("feasibility_sha256")
+    or feasibility.get("selected_steps_per_credit")
+    != lock.get("selected_steps_per_credit")
+    or feasibility.get("matrix") != lock.get("final_matrix")
+):
+    raise SystemExit("same-commit final recovery gate evidence changed")
+print("Verified locked final recovery gates in the scientific environment")
+PY
+}
+
+publish_final_recovery() {
+  python3 "$DRIVER_ROOT/tools/prepare-final-resume.py" \
+    publish "$JOB_ROOT" "$EXPECTED_COMMIT" "$DRIVER_COMMIT" "$GPU_UUID" "$LAUNCH_ID"
+}
+
+prepare_recovery_collection_transition() {
+  python3 "$DRIVER_ROOT/tools/prepare-final-resume.py" \
+    prepare-collection "$JOB_ROOT" "$EXPECTED_COMMIT" "$DRIVER_COMMIT" \
+    "$GPU_UUID" "$LAUNCH_ID"
+}
+
 prepare_collection_manifest() {
   "$UV_BIN" run python - "$JOB_ROOT" <<'PY'
 import sys
@@ -586,24 +678,42 @@ prune_rebuildable_cache() {
     fi
   done
   local retained
-  retained="$(du -sk -- "$JOB_ROOT" | awk '{print $1}')"
+  if ! retained="$(
+    bash "$DRIVER_ROOT/tools/measure-gpu-study-working-set.sh" \
+      "$REPO_ROOT" "$JOB_ROOT" retained
+  )" || [[ ! "$retained" =~ ^[0-9]+$ ]]; then
+    if (( attempt >= 2 )); then
+      resource_failure "retained_disk_measurement_failed"
+    fi
+    return 4
+  fi
   (( retained <= MAX_RETAINED_KIB )) || \
     die "verified retained evidence exceeds the authored 2 GB cap"
   printf 'Retained evidence: %s KiB\n' "$retained"
 }
 
 export LATESIGNAL_CACHE_ROOT="$CACHE_ROOT"
-run_stage bootstrap bootstrap_environment
-run_stage input_preflight verify_remote_inputs
-run_stage full_software_preflight make check
-run_stage feasibility run_feasibility
-readonly STEPS_PER_CREDIT="$(selected_steps)"
-run_stage selection_50 run_selection
-run_stage protocol_freeze lock_protocol
-run_stage cuda_resume_qualification run_qualification
-run_stage final_39 run_final_matrix
-run_stage aggregate run_aggregate
-run_stage collection_manifest prepare_collection_manifest
-run_stage retention prune_rebuildable_cache
+if [[ "$EXECUTION_MODE" == "final-recovery" ]]; then
+  run_stage recovery_verification verify_final_recovery
+  run_stage final_39 run_final_matrix
+  run_stage aggregate run_aggregate
+  run_stage recovery_collection_transition prepare_recovery_collection_transition
+  run_stage recovery_provenance publish_final_recovery
+  run_stage collection_manifest prepare_collection_manifest
+  run_stage retention prune_rebuildable_cache
+else
+  run_stage bootstrap bootstrap_environment
+  run_stage input_preflight verify_remote_inputs
+  run_stage full_software_preflight make check
+  run_stage feasibility run_feasibility
+  readonly STEPS_PER_CREDIT="$(selected_steps)"
+  run_stage selection_50 run_selection
+  run_stage protocol_freeze lock_protocol
+  run_stage cuda_resume_qualification run_qualification
+  run_stage final_39 run_final_matrix
+  run_stage aggregate run_aggregate
+  run_stage collection_manifest prepare_collection_manifest
+  run_stage retention prune_rebuildable_cache
+fi
 
 exit 0

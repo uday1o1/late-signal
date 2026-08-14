@@ -11,11 +11,12 @@ usage() {
 Usage:
   bash tools/gpu-study.sh submit SSH_HOST [GPU_INDEX]
   bash tools/gpu-study.sh resume SSH_HOST GPU_INDEX SOURCE_COMMIT
-  bash tools/gpu-study.sh status SSH_HOST
-  bash tools/gpu-study.sh logs SSH_HOST
-  bash tools/gpu-study.sh follow SSH_HOST
-  bash tools/gpu-study.sh attach SSH_HOST
-  bash tools/gpu-study.sh collect SSH_HOST
+  bash tools/gpu-study.sh recover-final SSH_HOST GPU_INDEX EXECUTION_COMMIT
+  bash tools/gpu-study.sh status SSH_HOST [EXECUTION_COMMIT]
+  bash tools/gpu-study.sh logs SSH_HOST [EXECUTION_COMMIT]
+  bash tools/gpu-study.sh follow SSH_HOST [EXECUTION_COMMIT]
+  bash tools/gpu-study.sh attach SSH_HOST [EXECUTION_COMMIT]
+  bash tools/gpu-study.sh collect SSH_HOST [EXECUTION_COMMIT]
 
 Submit the exact current origin/main revision as one detached, resumable tmux
 one-shot job on a trusted SSH-accessible NVIDIA GPU host. After submit confirms the
@@ -25,6 +26,10 @@ the remote job.
 Resume reuses only sealed selection evidence from a prior clean commit whose
 job stopped at the pre-scoring CUDA qualification gate. It binds explicit
 cross-commit provenance into the new protocol lock and carries prior GPU time.
+
+Recover-final resumes one exact final-stage checkpoint after the reviewed
+transient working-disk measurement failure. It keeps the scientific execution
+commit unchanged and uses only an allowlisted, commit-pinned watchdog fix.
 
 The same submit command resumes incomplete commit-scoped evidence. It refuses a
 duplicate active job, a completed job, a dirty checkout, a revision that is not
@@ -69,8 +74,14 @@ case "$ACTION" in
       exit 2
     }
     ;;
+  recover-final)
+    (( $# == 3 )) || {
+      usage >&2
+      exit 2
+    }
+    ;;
   status|logs|follow|attach|collect)
-    (( $# == 1 )) || {
+    (( $# == 1 || $# == 2 )) || {
       usage >&2
       exit 2
     }
@@ -82,8 +93,17 @@ case "$ACTION" in
 esac
 
 readonly SSH_HOST="$1"
-readonly GPU_INDEX="${2:-0}"
-readonly RESUME_COMMIT="${3:--}"
+readonly GPU_INDEX="$([[ "$ACTION" =~ ^(submit|resume|recover-final)$ ]] && printf '%s' "${2:-0}" || printf '0')"
+readonly RESUME_COMMIT="$([[ "$ACTION" == "resume" ]] && printf '%s' "${3:--}" || printf '-')"
+readonly REQUESTED_EXECUTION_COMMIT="$(
+  if [[ "$ACTION" == "recover-final" ]]; then
+    printf '%s' "$3"
+  elif [[ "$ACTION" =~ ^(status|logs|follow|attach|collect)$ && $# == 2 ]]; then
+    printf '%s' "$2"
+  else
+    printf '-'
+  fi
+)"
 [[ "$SSH_HOST" =~ ^[A-Za-z0-9._@-]+$ ]] || die "SSH_HOST contains unsupported characters"
 [[ "$GPU_INDEX" =~ ^[0-9]+$ ]] || die "GPU_INDEX must be a non-negative integer"
 if [[ "$ACTION" == "resume" ]]; then
@@ -91,10 +111,17 @@ if [[ "$ACTION" == "resume" ]]; then
 else
   [[ "$RESUME_COMMIT" == "-" ]] || die "unexpected resume commit"
 fi
+if [[ "$REQUESTED_EXECUTION_COMMIT" != "-" ]]; then
+  [[ "$REQUESTED_EXECUTION_COMMIT" =~ ^[0-9a-f]{40}$ ]] || \
+    die "EXECUTION_COMMIT must be a full Git hash"
+fi
 
 for command_name in git rsync ssh; do
   require_command "$command_name"
 done
+if [[ "$ACTION" == "recover-final" ]]; then
+  require_command python3
+fi
 if [[ "$ACTION" == "collect" ]]; then
   require_command uv
 fi
@@ -105,9 +132,10 @@ cd "$REPO_ROOT"
 [[ -f pyproject.toml && -f uv.lock ]] || die "could not resolve the LateSignal repository root"
 
 readonly LOCAL_HEAD="$(git rev-parse HEAD)"
-readonly COMMIT_SHORT="${LOCAL_HEAD:0:12}"
+readonly EXECUTION_COMMIT="$([[ "$REQUESTED_EXECUTION_COMMIT" == "-" ]] && printf '%s' "$LOCAL_HEAD" || printf '%s' "$REQUESTED_EXECUTION_COMMIT")"
+readonly COMMIT_SHORT="${EXECUTION_COMMIT:0:12}"
 readonly SESSION_NAME="latesignal-$COMMIT_SHORT"
-readonly LAUNCH_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+readonly LAUNCH_ID="$([[ "$ACTION" == "recover-final" ]] && printf 'recovery-%s' "${LOCAL_HEAD:0:12}" || printf '%s-%s' "$(date -u +%Y%m%dT%H%M%SZ)" "$$")"
 remote_home="$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$SSH_HOST" 'printf %s "$HOME"')"
 [[ "$remote_home" =~ ^/[A-Za-z0-9._/-]+$ && "$remote_home" != *..* ]] || \
   die "remote home path contains unsupported characters"
@@ -299,6 +327,187 @@ case "$origin_url" in
     ;;
 esac
 
+if [[ "$ACTION" == "recover-final" ]]; then
+  python3 tools/prepare-final-resume.py \
+    verify-driver "$REPO_ROOT" "$EXECUTION_COMMIT" "$LOCAL_HEAD" --quiet
+  printf 'Checking same-commit final recovery on %s, GPU %s, execution %s, driver %s...\n' \
+    "$SSH_HOST" "$GPU_INDEX" "$EXECUTION_COMMIT" "$LOCAL_HEAD"
+  setup_output="$(ssh "$SSH_HOST" bash -s -- \
+    "$REMOTE_GIT_ROOT" \
+    "$REMOTE_ROOT" \
+    "$REMOTE_JOB" \
+    "$clone_url" \
+    "$LOCAL_HEAD" \
+    "$EXECUTION_COMMIT" \
+    "$SESSION_NAME" \
+    "$GPU_INDEX" \
+    "$MIN_DISK_GB" \
+    "$MIN_MEMORY_GB" \
+    "$MIN_VRAM_MIB" <<'REMOTE_FINAL_RECOVERY'
+set -Eeuo pipefail
+remote_git_root="$1"
+execution_root="$2"
+job="$3"
+clone_url="$4"
+driver_commit="$5"
+execution_commit="$6"
+session="$7"
+gpu_index="$8"
+min_disk_gb="$9"
+min_memory_gb="${10}"
+min_vram_mib="${11}"
+
+for command_name in git tmux flock setsid nvidia-smi python3 df awk sed timeout du; do
+  command -v "$command_name" >/dev/null 2>&1 || {
+    printf 'error: required remote command not found: %s\n' "$command_name" >&2
+    exit 1
+  }
+done
+tmux has-session -t "=$session" 2>/dev/null && {
+  printf 'error: the exact final recovery is already active\n' >&2
+  exit 1
+}
+active="$(tmux list-sessions -F '#{session_name}' 2>/dev/null | sed -n '/^latesignal-/p' || true)"
+[[ -z "$active" ]] || {
+  printf 'error: another LateSignal tmux job is active: %s\n' "$active" >&2
+  exit 1
+}
+
+[[ -d "$remote_git_root/.git" ]] || {
+  printf 'error: remote source repository is missing\n' >&2
+  exit 1
+}
+[[ -z "$(git -C "$remote_git_root" status --porcelain --untracked-files=all)" ]] || {
+  printf 'error: remote driver repository has source changes\n' >&2
+  exit 1
+}
+git -C "$remote_git_root" remote set-url origin "$clone_url"
+GIT_TERMINAL_PROMPT=0 git \
+  -c credential.helper= \
+  -c credential.helper=store \
+  -C "$remote_git_root" fetch --prune origin main
+git -C "$remote_git_root" checkout main
+git -C "$remote_git_root" merge --ff-only origin/main
+[[ "$(git -C "$remote_git_root" rev-parse HEAD)" == "$driver_commit" ]] || {
+  printf 'error: remote recovery driver does not match confirmed origin/main\n' >&2
+  exit 1
+}
+[[ -e "$execution_root/.git" && ! -L "$execution_root/.git" ]] || {
+  printf 'error: scientific execution worktree is missing\n' >&2
+  exit 1
+}
+[[ "$(git -C "$execution_root" rev-parse HEAD)" == "$execution_commit" ]] || {
+  printf 'error: scientific execution commit changed\n' >&2
+  exit 1
+}
+[[ -z "$(git -C "$execution_root" status --porcelain --untracked-files=all)" ]] || {
+  printf 'error: scientific execution worktree has source changes\n' >&2
+  exit 1
+}
+[[ "$job" == "$execution_root/runs/one-shot/${execution_commit:0:12}" && \
+   -d "$job" && ! -L "$job" ]] || {
+  printf 'error: exact failed final job root is missing or redirected\n' >&2
+  exit 1
+}
+
+available_memory_kib="$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo)"
+(( available_memory_kib >= min_memory_gb * 1024 * 1024 )) || {
+  printf 'error: remote host has less than %s GB available memory\n' "$min_memory_gb" >&2
+  exit 1
+}
+gpu_uuid="$(timeout 10s nvidia-smi --id="$gpu_index" --query-gpu=uuid --format=csv,noheader,nounits | tr -d '[:space:]')"
+vram_mib="$(timeout 10s nvidia-smi --id="$gpu_index" --query-gpu=memory.total --format=csv,noheader,nounits | tr -d '[:space:]')"
+[[ "$gpu_uuid" =~ ^GPU-[A-Za-z0-9-]+$ && "$vram_mib" =~ ^[0-9]+$ ]] || {
+  printf 'error: selected GPU is unavailable\n' >&2
+  exit 1
+}
+(( vram_mib >= min_vram_mib )) || {
+  printf 'error: selected GPU has less than %s MiB VRAM\n' "$min_vram_mib" >&2
+  exit 1
+}
+compute_pids="$(timeout 10s nvidia-smi --id="$gpu_index" --query-compute-apps=pid \
+  --format=csv,noheader,nounits 2>/dev/null | sed '/^[[:space:]]*$/d' || true)"
+[[ -z "$compute_pids" ]] || {
+  printf 'error: selected GPU already has active compute processes\n' >&2
+  exit 1
+}
+
+measured_working_kib="$(
+  bash "$remote_git_root/tools/measure-gpu-study-working-set.sh" "$execution_root" "$job"
+)" || {
+  printf 'error: patched working-set measurement did not pass on the live job tree\n' >&2
+  exit 1
+}
+[[ "$measured_working_kib" =~ ^[0-9]+$ ]] || {
+  printf 'error: patched working-set measurement is malformed\n' >&2
+  exit 1
+}
+(( measured_working_kib <= 25 * 1024 * 1024 )) || {
+  printf 'error: live job tree exceeds the 25 GB working cap\n' >&2
+  exit 1
+}
+free_kib="$(df -Pk "$job" | awk 'NR == 2 {print $4}')"
+[[ "$free_kib" =~ ^[0-9]+$ ]] || {
+  printf 'error: live free-disk measurement is malformed\n' >&2
+  exit 1
+}
+(( free_kib >= min_disk_gb * 1024 * 1024 )) || {
+  printf 'error: remote host has less than %s GB free disk\n' "$min_disk_gb" >&2
+  exit 1
+}
+
+recovery_output="$(
+  python3 "$remote_git_root/tools/prepare-final-resume.py" prepare \
+    "$remote_git_root" "$execution_root" "$job" \
+    "$execution_commit" "$driver_commit" "$gpu_uuid"
+)"
+recovery_launch_id="$(
+  printf '%s\n' "$recovery_output" | sed -n 's/^RECOVERY_LAUNCH_ID=//p' | tail -n 1
+)"
+prior_gpu_seconds="$(
+  printf '%s\n' "$recovery_output" | sed -n 's/^PRIOR_GPU_SECONDS=//p' | tail -n 1
+)"
+[[ "$recovery_launch_id" =~ ^[A-Za-z0-9-]+$ ]] || {
+  printf 'error: final recovery launch identity is malformed\n' >&2
+  exit 1
+}
+[[ "$prior_gpu_seconds" =~ ^[0-9]+$ ]] || {
+  printf 'error: final recovery GPU accounting is malformed\n' >&2
+  exit 1
+}
+printf 'GPU_UUID=%s\n' "$gpu_uuid"
+printf 'RECOVERY_LAUNCH_ID=%s\n' "$recovery_launch_id"
+printf 'PRIOR_GPU_SECONDS=%s\n' "$prior_gpu_seconds"
+printf 'WORKING_KIB=%s\n' "$measured_working_kib"
+printf 'FREE_KIB=%s\n' "$free_kib"
+REMOTE_FINAL_RECOVERY
+)"
+  printf '%s\n' "$setup_output"
+  gpu_uuid="$(printf '%s\n' "$setup_output" | sed -n 's/^GPU_UUID=//p' | tail -n 1)"
+  recovery_launch_id="$(
+    printf '%s\n' "$setup_output" | sed -n 's/^RECOVERY_LAUNCH_ID=//p' | tail -n 1
+  )"
+  prior_gpu_seconds="$(
+    printf '%s\n' "$setup_output" | sed -n 's/^PRIOR_GPU_SECONDS=//p' | tail -n 1
+  )"
+  [[ "$gpu_uuid" =~ ^GPU-[A-Za-z0-9-]+$ ]] || \
+    die "remote final recovery did not return a stable GPU UUID"
+  [[ "$recovery_launch_id" =~ ^[A-Za-z0-9-]+$ ]] || \
+    die "remote final recovery did not return a launch identity"
+  [[ "$prior_gpu_seconds" =~ ^[0-9]+$ ]] || \
+    die "remote final recovery did not return GPU accounting"
+  printf 'Submitting detached tmux session %s...\n' "$SESSION_NAME"
+  ssh "$SSH_HOST" bash "$REMOTE_GIT_ROOT/tools/start-gpu-study-remote.sh" \
+    "$REMOTE_ROOT" "$REMOTE_JOB" "$gpu_uuid" "$EXECUTION_COMMIT" "$SESSION_NAME" \
+    "$recovery_launch_id" "$prior_gpu_seconds" final-recovery "$LOCAL_HEAD"
+  printf '\nRemote same-commit final recovery started successfully.\n'
+  printf 'The Mac may now disconnect, sleep, or shut down.\n'
+  printf 'Status:  bash tools/gpu-study.sh status %s %s\n' "$SSH_HOST" "$EXECUTION_COMMIT"
+  printf 'Logs:    bash tools/gpu-study.sh logs %s %s\n' "$SSH_HOST" "$EXECUTION_COMMIT"
+  printf 'Collect: bash tools/gpu-study.sh collect %s %s\n' "$SSH_HOST" "$EXECUTION_COMMIT"
+  exit 0
+fi
+
 printf 'Checking %s, GPU %s, and exact commit %s...\n' \
   "$SSH_HOST" "$GPU_INDEX" "$LOCAL_HEAD"
 setup_output="$(ssh "$SSH_HOST" bash -s -- \
@@ -399,8 +608,8 @@ available_memory_kib="$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo)"
   exit 1
 }
 
-gpu_uuid="$(nvidia-smi --id="$gpu_index" --query-gpu=uuid --format=csv,noheader,nounits | tr -d '[:space:]')"
-vram_mib="$(nvidia-smi --id="$gpu_index" --query-gpu=memory.total --format=csv,noheader,nounits | tr -d '[:space:]')"
+gpu_uuid="$(timeout 10s nvidia-smi --id="$gpu_index" --query-gpu=uuid --format=csv,noheader,nounits | tr -d '[:space:]')"
+vram_mib="$(timeout 10s nvidia-smi --id="$gpu_index" --query-gpu=memory.total --format=csv,noheader,nounits | tr -d '[:space:]')"
 [[ "$gpu_uuid" =~ ^GPU-[A-Za-z0-9-]+$ && "$vram_mib" =~ ^[0-9]+$ ]] || {
   printf 'error: selected GPU is unavailable\n' >&2
   exit 1
@@ -409,7 +618,7 @@ vram_mib="$(nvidia-smi --id="$gpu_index" --query-gpu=memory.total --format=csv,n
   printf 'error: selected GPU has less than %s MiB VRAM\n' "$min_vram_mib" >&2
   exit 1
 }
-compute_pids="$(nvidia-smi --id="$gpu_index" --query-compute-apps=pid \
+compute_pids="$(timeout 10s nvidia-smi --id="$gpu_index" --query-compute-apps=pid \
   --format=csv,noheader,nounits 2>/dev/null | sed '/^[[:space:]]*$/d' || true)"
 [[ -z "$compute_pids" ]] || {
   printf 'error: selected GPU already has active compute processes\n' >&2
