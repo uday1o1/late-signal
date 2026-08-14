@@ -228,7 +228,8 @@ from pathlib import Path
 
 from latesignal.experiments.protocol_lock import _verify_prepared_data
 
-verification = _verify_prepared_data(Path("data/processed"))
+manifest_path = Path("data/processed/manifests/preparation.json")
+verification = _verify_prepared_data(manifest_path)
 print(
     "Verified prepared data: "
     f"{verification['verified_files']} files, "

@@ -27,3 +27,10 @@ def test_remote_gpu_script_uses_existing_https_credentials_without_reading_them(
     assert "GIT_TERMINAL_PROMPT=0" in source
     assert "cat ~/.git-credentials" not in source
     assert "git@github.com:${origin_url#https://github.com/}" not in source
+
+
+def test_remote_gpu_script_verifies_the_preparation_manifest() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+
+    assert 'Path("data/processed/manifests/preparation.json")' in source
+    assert '_verify_prepared_data(Path("data/processed"))' not in source
