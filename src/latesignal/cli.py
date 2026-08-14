@@ -12,6 +12,7 @@ import yaml
 
 from latesignal.contracts.config import load_synthetic_config
 from latesignal.contracts.protocol import load_final_protocol
+from latesignal.contracts.reproduction import load_reproduction_manifest
 from latesignal.contracts.selection import load_selection_results
 from latesignal.contracts.study_a import load_study_a_config
 from latesignal.contracts.study_b import load_study_b_config
@@ -24,6 +25,7 @@ from latesignal.errors import ExitCode, LateSignalError
 from latesignal.evaluation.runner import compare_run_dirs, evaluate_run_dir
 from latesignal.experiments.estimate import estimate_protocol
 from latesignal.experiments.protocol_lock import create_protocol_lock
+from latesignal.experiments.reproduction import reproduce_synthetic
 from latesignal.experiments.runner import resume_synthetic_experiment, run_synthetic_experiment
 from latesignal.experiments.study_a import run_study_a
 from latesignal.experiments.study_b import run_study_b
@@ -359,6 +361,52 @@ def report_command(
             "out": str(output_root),
             "format": report_format,
             "manifest_sha256": manifest["manifest_sha256"],
+        },
+        json_output,
+    )
+
+
+@app.command("reproduce")
+def reproduce_command(
+    manifest: Annotated[
+        Path,
+        typer.Argument(
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+            help="Locked reproduction manifest.",
+        ),
+    ],
+    out: Annotated[
+        Path,
+        typer.Option(
+            "--out",
+            file_okay=False,
+            dir_okay=True,
+            resolve_path=True,
+            help="New reproduction run directory.",
+        ),
+    ],
+    json_output: JsonOption = False,
+) -> None:
+    """Reproduce a locked synthetic result and compare every public output."""
+
+    try:
+        result = reproduce_synthetic(
+            load_reproduction_manifest(manifest),
+            out,
+            repository=Path.cwd(),
+        )
+    except LateSignalError as error:
+        _fail(error, json_output)
+    _emit(
+        {
+            "ok": True,
+            "status": result["status"],
+            "out": str(out),
+            "reproduction": str(out / "reproduction.json"),
         },
         json_output,
     )
