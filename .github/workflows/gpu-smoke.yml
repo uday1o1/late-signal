@@ -19,8 +19,6 @@ jobs:
       - x64
       - nvidia-gpu
     timeout-minutes: 30
-    env:
-      RUN_ROOT: ${{ runner.temp }}/latesignal-gpu-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Check out the trusted revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -42,6 +40,8 @@ jobs:
         run: nvidia-smi
 
       - name: Run the bounded public CUDA path
+        env:
+          RUN_ROOT: ${{ runner.temp }}/latesignal-gpu-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           mkdir -p "$RUN_ROOT"
           uv run latesignal protocol validate configs/experiments/gpu_smoke.yaml \
@@ -57,6 +57,8 @@ jobs:
       - name: Clean only this workflow run directory
         if: ${{ always() }}
         shell: bash
+        env:
+          RUN_ROOT: ${{ runner.temp }}/latesignal-gpu-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           expected="${{ runner.temp }}/latesignal-gpu-${{ github.run_id }}-${{ github.run_attempt }}"
           test "$RUN_ROOT" = "$expected"

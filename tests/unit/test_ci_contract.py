@@ -16,6 +16,8 @@ def test_external_actions_are_commit_pinned_and_cpu_ci_never_fetches_data() -> N
     cpu = (workflow_root / "ci.yml").read_text(encoding="utf-8")
     assert "latesignal data fetch" not in cpu
     assert "uv sync --frozen --all-groups" in cpu
+    assert "actionlint_1.7.12_linux_amd64.tar.gz" in cpu
+    assert "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8" in cpu
     assert "uv run ruff format --check ." in cpu
     assert "uv run mypy" in cpu
     assert "uv run pytest" in cpu
@@ -26,11 +28,15 @@ def test_gpu_workflow_is_manual_bounded_and_uses_an_exact_cleanup_target() -> No
 
     trigger = workflow.split("permissions:", maxsplit=1)[0]
     assert "workflow_dispatch:" in trigger
+    assert "push:" not in trigger
     assert "pull_request:" not in trigger
     assert "nvidia-gpu" in workflow
     assert "protocol validate configs/experiments/gpu_smoke.yaml" in workflow
     assert 'test "$RUN_ROOT" = "$expected"' in workflow
     assert 'rm -rf -- "$RUN_ROOT"' in workflow
+    assert Path(".github/actionlint.yaml").read_text(encoding="utf-8") == (
+        "self-hosted-runner:\n  labels:\n    - nvidia-gpu\n"
+    )
 
     final, protocol, _ = load_final_protocol(Path("configs/experiments/gpu_smoke.yaml"))
     assert final.target_device == "cuda"
