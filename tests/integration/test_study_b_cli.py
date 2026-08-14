@@ -41,8 +41,8 @@ def test_public_study_b_matches_compute_and_triggers_early(tmp_path: Path) -> No
     assert all(policy["exposure_rows"] == 192 for policy in policies)
     assert manifest["synthetic_shift"] == {
         "click_day": 3,
-        "first_legal_monitoring_day": 33,
-        "adaptive_first_spend": 33,
+        "first_legal_monitoring_day": 34,
+        "adaptive_first_spend": 34,
         "deadline_first_spend": 35,
         "triggered_earlier": True,
     }

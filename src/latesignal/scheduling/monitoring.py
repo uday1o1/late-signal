@@ -84,11 +84,13 @@ def calibration_evidence(
 ) -> CalibrationEvidence:
     """Compute the maximum eligible fixed-bin mature calibration residual."""
 
-    if decision_day < maturity_days or monitoring_window_days <= 0 or bin_count <= 1:
+    if decision_day <= maturity_days or monitoring_window_days <= 0 or bin_count <= 1:
         raise ValueError("Calibration monitoring bounds are invalid")
     if minimum_bin_examples <= 0 or minimum_variance < 0.0 or epsilon <= 0.0:
         raise ValueError("Calibration support settings are invalid")
-    newest_day = decision_day - maturity_days
+    # At the start of D(d), click day d - maturity_days is only beginning to
+    # mature. The newest fully mature half-open click cohort is one day older.
+    newest_day = decision_day - maturity_days - 1
     first_day = newest_day - monitoring_window_days + 1
     selected = tuple(
         example

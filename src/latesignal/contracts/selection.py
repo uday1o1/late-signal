@@ -26,7 +26,7 @@ class SelectionWindow(StrictModel):
 
 class CandidateResult(StrictModel):
     config_sha256: Digest = Field(pattern=r"^[0-9a-f]{64}$")
-    status: Literal["complete", "failed", "incomplete"]
+    status: Literal["complete", "protocol_invalid", "infrastructure_failed", "incomplete"]
     mean_selection_log_loss: float | None
     measured_compute_seconds: float | None = Field(ge=0.0)
     parameter_count: int | None = Field(ge=0)
@@ -50,6 +50,22 @@ class CandidateResult(StrictModel):
                 raise ValueError("Complete candidate metrics must be finite")
         elif not self.failure_reason:
             raise ValueError("A failed or incomplete candidate requires a failure reason")
+        elif self.status == "protocol_invalid" and self.failure_reason not in {
+            "INSUFFICIENT_LEGAL_POOL",
+            "INSUFFICIENT_LEGAL_AUXILIARY_POOL",
+        }:
+            raise ValueError("Protocol-invalid candidate has an undeclared scientific reason")
+        elif self.status == "infrastructure_failed" and self.failure_reason not in {
+            "INFRASTRUCTURE_FAILURE",
+            "TIMEOUT",
+            "INTERRUPTED",
+            "OOM",
+            "DISK_EXHAUSTED",
+            "CORRUPT_ARTIFACT",
+        }:
+            raise ValueError("Infrastructure failure has an undeclared reason")
+        elif self.status == "incomplete" and self.failure_reason != "INCONCLUSIVE":
+            raise ValueError("Incomplete candidate must be explicitly inconclusive")
         return self
 
 

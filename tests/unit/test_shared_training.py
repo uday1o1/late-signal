@@ -74,6 +74,7 @@ def _offline_split() -> MatureOfflineSplit:
         evaluation_labels=labels[180:],
         evaluation_click_times=np.arange(181, 241, dtype=np.float64),
         training_cutoff=180.0,
+        maturity_window=1.0,
     )
 
 
@@ -148,6 +149,26 @@ def test_offline_split_rejects_immature_training_truth() -> None:
             evaluation_labels=split.evaluation_labels,
             evaluation_click_times=split.evaluation_click_times,
             training_cutoff=180.0,
+            maturity_window=1.0,
+        )
+
+
+def test_offline_split_rejects_early_positive_from_incomplete_cohort() -> None:
+    split = _offline_split()
+    click_times = split.train_click_times.copy()
+    click_times[-1] = 179.5
+
+    with pytest.raises(ConsistencyError, match="incomplete click cohort"):
+        MatureOfflineSplit(
+            train_features=split.train_features,
+            train_labels=split.train_labels,
+            train_click_times=click_times,
+            train_available_at=split.train_available_at,
+            evaluation_features=split.evaluation_features,
+            evaluation_labels=split.evaluation_labels,
+            evaluation_click_times=split.evaluation_click_times,
+            training_cutoff=180.0,
+            maturity_window=1.0,
         )
 
 

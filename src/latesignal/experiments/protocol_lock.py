@@ -40,6 +40,14 @@ DIRECT_PACKAGES = (
 
 
 def _select[Candidate: CandidateResult](candidates: list[Candidate]) -> Candidate:
+    blockers = [
+        item for item in candidates if item.status in {"infrastructure_failed", "incomplete"}
+    ]
+    if blockers:
+        raise ConsistencyError(
+            "Selection contains a non-scientific failure and cannot be locked",
+            details={"config_sha256": [item.config_sha256 for item in blockers]},
+        )
     complete = [item for item in candidates if item.status == "complete"]
     if not complete:
         raise ConsistencyError("Selection stage has no complete candidate")
@@ -78,6 +86,10 @@ def selection_decisions(results: SelectionResults) -> dict[str, object]:
         "model": model.model_dump(mode="json"),
         "delayed": delayed.model_dump(mode="json"),
         "sampler": sampler.model_dump(mode="json"),
+        "derived": {
+            "shared_wait_days": delayed.wait_days,
+            "study_b_method": delayed.method,
+        },
         "tie_policy": {
             "metric_tolerance": 1e-6,
             "order": [

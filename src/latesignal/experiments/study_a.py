@@ -65,7 +65,8 @@ class _AuxiliaryTraining:
     q_dp: ConversionMLP
     q_tn_optimizer: torch.optim.AdamW
     q_dp_optimizer: torch.optim.AdamW
-    rng: random.Random
+    q_tn_rng: random.Random
+    q_dp_rng: random.Random
     steps: int = 0
     examples: int = 0
 
@@ -285,14 +286,20 @@ def _standard_trainer(
 
 
 def _new_auxiliary(config: StudyAConfig) -> _AuxiliaryTraining:
-    q_tn = _new_conversion_model()
-    q_dp = _new_conversion_model()
+    devices = list(range(torch.cuda.device_count())) if torch.cuda.is_available() else []
+    with torch.random.fork_rng(devices=devices):
+        torch.manual_seed(config.seed + 1_000)
+        q_tn = _new_conversion_model()
+    with torch.random.fork_rng(devices=devices):
+        torch.manual_seed(config.seed + 2_000)
+        q_dp = _new_conversion_model()
     return _AuxiliaryTraining(
         q_tn=q_tn,
         q_dp=q_dp,
         q_tn_optimizer=torch.optim.AdamW(q_tn.parameters(), lr=3e-4, weight_decay=1e-4),
         q_dp_optimizer=torch.optim.AdamW(q_dp.parameters(), lr=3e-4, weight_decay=1e-4),
-        rng=random.Random(config.seed + 1_000),
+        q_tn_rng=random.Random(config.seed + 1_000),
+        q_dp_rng=random.Random(config.seed + 2_000),
     )
 
 
@@ -357,7 +364,7 @@ def _update_auxiliary(
         "q_tn_target",
         steps=steps,
         batch_size=config.batch_size,
-        rng=auxiliary.rng,
+        rng=auxiliary.q_tn_rng,
     )
     _train_aux_model(
         auxiliary.q_dp,
@@ -366,7 +373,7 @@ def _update_auxiliary(
         "q_dp_target",
         steps=steps,
         batch_size=config.batch_size,
-        rng=auxiliary.rng,
+        rng=auxiliary.q_dp_rng,
     )
     auxiliary.steps += 2 * steps
     auxiliary.examples += 2 * steps * config.batch_size

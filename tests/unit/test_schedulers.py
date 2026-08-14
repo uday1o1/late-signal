@@ -88,7 +88,7 @@ def test_fixed_schedulers_spend_exactly_once_per_window(policy: str, expected_fi
 
 
 def test_calibration_residual_matches_hand_calculation() -> None:
-    examples = tuple(_cohort(1, shifted=True))
+    examples = tuple(_cohort(0, shifted=True) + _cohort(1, shifted=True))
 
     evidence = calibration_evidence(
         examples,
@@ -105,6 +105,20 @@ def test_calibration_residual_matches_hand_calculation() -> None:
     assert selected.positives == 1_000
     assert selected.signed_residual_sum == 500.0
     assert selected.variance_sum == 250.0
+    assert evidence.monitoring_cohort_last_day == 0
+
+
+def test_monitoring_excludes_cohort_that_only_starts_maturing_at_boundary() -> None:
+    evidence = calibration_evidence(
+        tuple(_cohort(0, shifted=False) + _cohort(1, shifted=True)),
+        decision_day=31,
+        model_checkpoint_sha256="d" * 64,
+        monitor_seed=SEED,
+    )
+
+    assert evidence.monitoring_cohort_last_day == 0
+    assert evidence.monitoring_examples == 1_000
+    assert evidence.bins[5].positives == 500
 
 
 def test_calibration_scheduler_triggers_early_on_mature_shift_and_is_reproducible() -> None:
@@ -127,10 +141,10 @@ def test_calibration_scheduler_triggers_early_on_mature_shift_and_is_reproducibl
         spend_times.append(spends[0].decision_time)
         audit_logs.append(scheduler.evidence_log)
 
-    assert spend_times == [33 * DAY, 33 * DAY]
+    assert spend_times == [34 * DAY, 34 * DAY]
     assert audit_logs[0] == audit_logs[1]
-    assert audit_logs[0][2]["monitoring_cohort_last_day"] == 3
-    assert audit_logs[0][2]["model_checkpoint_sha256"] == "c" * 64
+    assert audit_logs[0][3]["monitoring_cohort_last_day"] == 3
+    assert audit_logs[0][3]["model_checkpoint_sha256"] == "c" * 64
 
 
 def test_unsupported_calibration_cannot_trigger_and_deadline_forces_spend() -> None:

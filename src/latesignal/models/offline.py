@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -26,6 +27,7 @@ class MatureOfflineSplit:
     evaluation_labels: IntVector
     evaluation_click_times: FloatVector
     training_cutoff: float
+    maturity_window: float
 
     def __post_init__(self) -> None:
         self._validate_partition(
@@ -46,6 +48,10 @@ class MatureOfflineSplit:
             raise ConsistencyError("Training availability contains a non-finite value")
         if np.any(self.train_click_times > self.training_cutoff):
             raise ConsistencyError("Offline training includes a future click")
+        if not math.isfinite(self.maturity_window) or self.maturity_window <= 0.0:
+            raise ConsistencyError("Offline maturity window must be finite and positive")
+        if np.any(self.train_click_times + self.maturity_window > self.training_cutoff):
+            raise ConsistencyError("Offline training includes an incomplete click cohort")
         if np.any(self.train_available_at > self.training_cutoff):
             raise ConsistencyError("Offline training includes an immature label")
         if np.any(self.evaluation_click_times <= self.training_cutoff):

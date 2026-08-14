@@ -25,9 +25,17 @@ Selection is staged in this order:
 2. Select delayed-method parameters under the selected model.
 3. Select sampler parameters under the selected deployable method.
 
+The nuisance sampler for the first two stages is authored in the protocol before outcomes are read.
+All three stages train only on click days 0 through 24 using ten credits at daily boundaries D55 through D64.
+Candidate predictions for held-out click days 25 through 34 are sealed before their truth is joined at D65.
+Selection code rejects every click ID from embargo days 35 through 64 and final days 65 through 89.
+The winning delayed pair supplies one shared wait duration to fixed-wait and ES-DFM in final Study A, and supplies the fixed Study B learner.
+
 Each stage minimizes selection-period mean log loss under its fixed compute cap.
 An exact metric tie within `1e-6` prefers lower measured compute, then fewer parameters, then the lexicographically smaller canonical configuration hash.
 The complete attempted candidate table must be retained, including failed and incomplete runs.
+Infrastructure failure, timeout, interruption, out-of-memory, disk exhaustion, corruption, or inconclusive evidence blocks protocol locking after bounded recovery.
+Only a predeclared insufficient legal main or auxiliary pool may classify a candidate as scientifically protocol-invalid.
 
 ## Feasibility gate
 

@@ -18,6 +18,17 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
 
 
+class SelectionDefaults(StrictModel):
+    model_method: Literal["complete_wait"]
+    recent_window_days: Literal[1, 3, 7]
+    reservoir_capacity: Literal[1_000_000, 5_000_000]
+    training_last_click_day: Literal[24]
+    scoring_first_click_day: Literal[25]
+    scoring_last_click_day: Literal[34]
+    first_credit_day: Literal[55]
+    last_credit_day: Literal[64]
+
+
 class ModelSelection(StrictModel):
     learning_rates: list[float] = Field(min_length=1)
     weight_decays: list[float] = Field(min_length=1)
@@ -54,6 +65,7 @@ class FinalTraining(StrictModel):
 
 class ProtocolDefinition(StrictModel):
     version: Literal[1]
+    selection_defaults: SelectionDefaults
     model_selection: ModelSelection
     delayed_selection: DelayedSelection
     sampler_selection: SamplerSelection
@@ -61,6 +73,19 @@ class ProtocolDefinition(StrictModel):
 
     @model_validator(mode="after")
     def unique_authored_values(self) -> ProtocolDefinition:
+        defaults = self.selection_defaults
+        selection_credit_count = defaults.last_credit_day - defaults.first_credit_day + 1
+        if selection_credit_count != 10:
+            raise ValueError("Selection credit boundaries must contain exactly ten days")
+        if any(
+            stage.credits_per_run != selection_credit_count
+            for stage in (
+                self.model_selection,
+                self.delayed_selection,
+                self.sampler_selection,
+            )
+        ):
+            raise ValueError("Every selection stage must use the authored credit boundaries")
         lists: tuple[Sequence[object], ...] = (
             self.model_selection.learning_rates,
             self.model_selection.weight_decays,

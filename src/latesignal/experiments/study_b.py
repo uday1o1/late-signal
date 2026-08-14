@@ -240,7 +240,7 @@ def run_study_b(config: StudyBConfig, output_root: Path) -> dict[str, Any]:
         "policies": policies,
         "synthetic_shift": {
             "click_day": config.shift_click_day,
-            "first_legal_monitoring_day": config.shift_click_day + 30,
+            "first_legal_monitoring_day": config.shift_click_day + 31,
             "adaptive_first_spend": adaptive["spend_times"][0] // DAY,
             "deadline_first_spend": deadline["spend_times"][0] // DAY,
             "triggered_earlier": True,

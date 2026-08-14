@@ -1,4 +1,13 @@
 version: 1
+selection_defaults:
+  model_method: complete_wait
+  recent_window_days: 3
+  reservoir_capacity: 1000000
+  training_last_click_day: 24
+  scoring_first_click_day: 25
+  scoring_last_click_day: 34
+  first_credit_day: 55
+  last_credit_day: 64
 model_selection:
   learning_rates:
     - 0.0001

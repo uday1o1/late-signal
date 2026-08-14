@@ -220,6 +220,10 @@ def test_public_protocol_lock_hashes_selection_data_code_and_environment(tmp_pat
     assert lock["publication_eligible"] is (not lock["git"]["dirty"])
     assert lock["git"]["allow_dirty_override"] is lock["git"]["dirty"]
     assert lock["selection_decisions"]["model"]["config_sha256"] == _digest("model-1")
+    assert lock["selection_decisions"]["derived"] == {
+        "shared_wait_days": 1,
+        "study_b_method": "fixed_wait",
+    }
     assert lock["data"]["verified_files"] == 1
     assert lock["final_seeds"] == [17, 41, 73]
     assert lock["selected_steps_per_credit"] == 500
@@ -229,3 +233,23 @@ def test_public_protocol_lock_hashes_selection_data_code_and_environment(tmp_pat
     write_json_atomic(output, stored, overwrite=True)
     with pytest.raises(ConsistencyError, match="does not match"):
         verify_protocol_lock(output)
+
+
+def test_selection_lock_refuses_infrastructure_failure(tmp_path: Path) -> None:
+    _, protocol_sha256, _ = _authored_configs(tmp_path)
+    selection = _selection(protocol_sha256)
+    selection["model_candidates"][0].update(
+        {
+            "status": "infrastructure_failed",
+            "mean_selection_log_loss": None,
+            "measured_compute_seconds": None,
+            "parameter_count": None,
+            "failure_reason": "OOM",
+        }
+    )
+    parsed = SelectionResults.model_validate(selection)
+
+    with pytest.raises(ConsistencyError, match="non-scientific failure"):
+        from latesignal.experiments.protocol_lock import selection_decisions
+
+        selection_decisions(parsed)

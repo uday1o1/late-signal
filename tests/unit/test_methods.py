@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import math
+import random
 from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 import torch
 
 from latesignal.contracts.events import ClickEvent, NegativeMaturity, PositiveReveal, TruthRecord
+from latesignal.contracts.study_a import load_study_a_config
+from latesignal.experiments.study_a import _model_hash, _new_auxiliary
 from latesignal.methods.base import DelayedMethod
 from latesignal.methods.complete_wait import CompleteWaitMethod
 from latesignal.methods.dfm import DelayedFeedbackMethod
@@ -16,6 +20,19 @@ from latesignal.methods.fnw import FakeNegativeWeightedMethod
 from latesignal.methods.immediate_fake_negative import ImmediateFakeNegativeMethod
 from latesignal.methods.losses import dfm_loss, esdfm_loss, fnw_loss
 from latesignal.methods.oracle_reference import OracleReferenceMethod
+
+
+def test_esdfm_auxiliary_models_and_samplers_use_separate_locked_seeds() -> None:
+    config = load_study_a_config(Path("configs/experiments/study_a.synthetic.yaml"))
+
+    first = _new_auxiliary(config)
+    repeated = _new_auxiliary(config)
+
+    assert _model_hash(first.q_tn) == _model_hash(repeated.q_tn)
+    assert _model_hash(first.q_dp) == _model_hash(repeated.q_dp)
+    assert _model_hash(first.q_tn) != _model_hash(first.q_dp)
+    assert first.q_tn_rng.random() == random.Random(config.seed + 1_000).random()
+    assert first.q_dp_rng.random() == random.Random(config.seed + 2_000).random()
 
 
 def test_complete_wait_emits_only_at_full_cohort_maturity() -> None:

@@ -49,6 +49,15 @@ def test_locked_protocol_enumerates_the_exact_authored_matrix(tmp_path: Path) ->
         "total_runs": 89,
         "total_online_credits": 1_883,
     }
+    assert protocol.selection_defaults.model_method == "complete_wait"
+    assert (
+        protocol.selection_defaults.recent_window_days,
+        protocol.selection_defaults.reservoir_capacity,
+    ) == (3, 1_000_000)
+    assert (
+        protocol.selection_defaults.first_credit_day,
+        protocol.selection_defaults.last_credit_day,
+    ) == (55, 64)
 
 
 def test_protocol_refuses_a_silently_narrowed_candidate_set(tmp_path: Path) -> None:
