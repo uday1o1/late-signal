@@ -15,13 +15,13 @@ from torch import Tensor, nn
 from latesignal.data.manifests import canonical_json_bytes
 from latesignal.errors import ConfigurationError, ConsistencyError
 from latesignal.features.store import FeatureTensorBatch
-from latesignal.methods.losses import fnw_loss
+from latesignal.methods.losses import esdfm_loss, fnw_loss
 from latesignal.models.conversion_mlp import CategoricalSpec, ConversionMLP
 from latesignal.training.budget import BudgetCounter
 from latesignal.training.packed import PackedDeterministicSampler, PackedSample
 from latesignal.training.reproducibility import configure_determinism
 
-LossMode = Literal["bce", "fnw"]
+LossMode = Literal["bce", "fnw", "es_dfm"]
 
 
 class FeatureProvider(Protocol):
@@ -29,6 +29,10 @@ class FeatureProvider(Protocol):
     def categorical_specs(self) -> dict[str, CategoricalSpec]: ...
 
     def tensor_batch(self, references: NDArray[np.integer]) -> FeatureTensorBatch: ...
+
+
+class AuxiliaryLogitProvider(Protocol):
+    def logits(self, features: FeatureTensorBatch) -> tuple[Tensor, Tensor]: ...
 
 
 def _snapshot_state(value: Any) -> Any:
@@ -185,9 +189,12 @@ class PackedConversionTrainer:
         credit_id: int,
         decision_time: float,
         sampler: PackedDeterministicSampler,
+        auxiliary_provider: AuxiliaryLogitProvider | None = None,
     ) -> CreditTrainingResult:
         if credit_id != self.budget.credits:
             raise ConsistencyError("Production credit ID is not contiguous")
+        if (self.config.loss_mode == "es_dfm") != (auxiliary_provider is not None):
+            raise ConsistencyError("ES-DFM auxiliary logits do not match the configured loss")
         examples = self.config.steps_per_credit * self.config.batch_size
         exposure_keys = np.empty(examples, dtype=np.uint64)
         exposure_sources = np.empty(examples, dtype=np.uint8)
@@ -204,6 +211,14 @@ class PackedConversionTrainer:
             logits = self.model(features.categorical, features.numeric)
             if self.config.loss_mode == "fnw":
                 weighted = fnw_loss(logits, targets)
+                loss = weighted.loss
+                weights = weighted.weights
+            elif self.config.loss_mode == "es_dfm":
+                assert auxiliary_provider is not None
+                q_tn_logits, q_dp_logits = auxiliary_provider.logits(features)
+                if q_tn_logits.shape != targets.shape or q_dp_logits.shape != targets.shape:
+                    raise ConsistencyError("ES-DFM auxiliary logits have an invalid shape")
+                weighted = esdfm_loss(logits, targets, q_tn_logits, q_dp_logits)
                 loss = weighted.loss
                 weights = weighted.weights
             else:
