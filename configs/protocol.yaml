@@ -50,6 +50,7 @@ sampler_selection:
     - 17
   credits_per_run: 10
 final_training:
+  initialization_steps: 500
   seeds:
     - 17
     - 41

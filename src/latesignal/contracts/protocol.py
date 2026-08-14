@@ -53,6 +53,7 @@ class SamplerSelection(StrictModel):
 
 
 class FinalTraining(StrictModel):
+    initialization_steps: Literal[500]
     seeds: list[int] = Field(min_length=3)
     steps_per_credit_candidates: list[Literal[100, 250, 500]] = Field(min_length=1)
     batch_size: int = Field(gt=0)

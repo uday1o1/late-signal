@@ -58,6 +58,7 @@ def test_locked_protocol_enumerates_the_exact_authored_matrix(tmp_path: Path) ->
         protocol.selection_defaults.first_credit_day,
         protocol.selection_defaults.last_credit_day,
     ) == (55, 64)
+    assert protocol.final_training.initialization_steps == 500
 
 
 def test_protocol_refuses_a_silently_narrowed_candidate_set(tmp_path: Path) -> None:

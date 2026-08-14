@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+from dataclasses import asdict
 from typing import Any, Protocol
 
 import numpy as np
@@ -12,6 +13,7 @@ from numpy.typing import NDArray
 
 from latesignal.data.manifests import canonical_json_bytes
 from latesignal.errors import ConsistencyError
+from latesignal.scheduling.credit import SpendDecision
 from latesignal.scheduling.monitoring import CalibrationEvidence, ResidualBin
 from latesignal.simulator.production_oracle import TruthEventBatch
 
@@ -263,3 +265,88 @@ class PackedMonitoringState:
         self.last_decision_day = last_day
         self.inference_examples = examples
         self.evidence_log = copy.deepcopy(evidence_log)
+
+
+class DailyRangeCreditScheduler:
+    """Spend one credit at every daily boundary in one authored closed range."""
+
+    name = "fixed_daily"
+
+    def __init__(
+        self,
+        *,
+        origin: int,
+        first_day: int,
+        last_day: int,
+        day_seconds: int = 86_400,
+    ) -> None:
+        if origin < 0 or first_day < 0 or last_day < first_day or day_seconds <= 0:
+            raise ValueError("Daily credit range is invalid")
+        self.origin = origin
+        self.first_day = first_day
+        self.last_day = last_day
+        self.day_seconds = day_seconds
+        self.decisions: list[SpendDecision] = []
+
+    @property
+    def expected_credits(self) -> int:
+        return self.last_day - self.first_day + 1
+
+    @property
+    def spent_count(self) -> int:
+        return len(self.decisions)
+
+    def decide(self, simulator_time: int) -> SpendDecision:
+        expected_day = self.first_day + len(self.decisions)
+        expected_time = self.origin + expected_day * self.day_seconds
+        if simulator_time != expected_time or expected_day > self.last_day:
+            raise ConsistencyError("Daily credit decision is not the next authored boundary")
+        decision = SpendDecision(
+            window_id=len(self.decisions),
+            decision_time=simulator_time,
+            spend=True,
+            reason="fixed_daily",
+        )
+        self.decisions.append(decision)
+        return decision
+
+    def assert_complete(self) -> None:
+        if len(self.decisions) != self.expected_credits:
+            raise ConsistencyError("Daily credit scheduler did not spend its exact budget")
+
+    def state_dict(self) -> dict[str, object]:
+        return {
+            "name": self.name,
+            "origin": self.origin,
+            "first_day": self.first_day,
+            "last_day": self.last_day,
+            "day_seconds": self.day_seconds,
+            "decisions": [asdict(value) for value in self.decisions],
+        }
+
+    def load_state_dict(self, state: dict[str, Any]) -> None:
+        raw_decisions = state.get("decisions")
+        if (
+            set(state) != {"name", "origin", "first_day", "last_day", "day_seconds", "decisions"}
+            or state.get("name") != self.name
+            or state.get("origin") != self.origin
+            or state.get("first_day") != self.first_day
+            or state.get("last_day") != self.last_day
+            or state.get("day_seconds") != self.day_seconds
+            or not isinstance(raw_decisions, list)
+            or not all(isinstance(value, dict) for value in raw_decisions)
+            or len(raw_decisions) > self.expected_credits
+        ):
+            raise ConsistencyError("Daily credit checkpoint state is malformed")
+        restored: list[SpendDecision] = []
+        for index, raw in enumerate(raw_decisions):
+            expected = SpendDecision(
+                window_id=index,
+                decision_time=self.origin + (self.first_day + index) * self.day_seconds,
+                spend=True,
+                reason="fixed_daily",
+            )
+            if raw != asdict(expected):
+                raise ConsistencyError("Daily credit checkpoint decision is inconsistent")
+            restored.append(expected)
+        self.decisions = restored
