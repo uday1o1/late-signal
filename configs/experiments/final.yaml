@@ -21,6 +21,7 @@ target_device: cuda
 require_real_pilot: true
 pilot:
   prepared_root: ../../data/processed
+  execution_host_has_source_artifacts: false
   max_click_days: 2
   benchmark_examples: 4096
   benchmark_batch_size: 2048
@@ -28,6 +29,7 @@ pilot:
   assumed_source_archive_gb: 2.0
   assumed_expanded_source_gb: 6.0
   assumed_prepared_data_gb: 2.5
+  assumed_runtime_feature_cache_gb: 2.0
   temporary_margin_gb: 5.0
   assumed_host_memory_gb: 16.0
 caps:

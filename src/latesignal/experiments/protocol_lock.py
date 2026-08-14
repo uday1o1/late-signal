@@ -200,7 +200,8 @@ def create_protocol_lock(
     if selection.protocol_sha256 != protocol_sha256:
         raise ConsistencyError("Selection results do not match the authored protocol")
     if (
-        feasibility.get("status") != "passed"
+        feasibility.get("feasibility_model_version") != 2
+        or feasibility.get("status") != "passed"
         or feasibility.get("protocol_sha256") != protocol_sha256
         or feasibility.get("blockers") != []
         or feasibility.get("matrix") != enumerate_matrix(protocol, final)
@@ -218,6 +219,7 @@ def create_protocol_lock(
         or benchmark.get("requested_device_available") is not True
         or not isinstance(real_pilot, dict)
         or (final.require_real_pilot and real_pilot.get("status") != "measured")
+        or not isinstance(real_pilot.get("workload_inventory"), dict)
         or not isinstance(projections, list)
     ):
         raise ConsistencyError("Feasibility evidence does not satisfy its measured prerequisites")

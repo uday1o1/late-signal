@@ -22,7 +22,15 @@ def test_public_protocol_validation_reports_exact_external_blockers(
             "measured_device": "cpu",
             "requested_device_available": False,
             "training_examples_per_second": 10_000_000.0,
+            "training_step_seconds": 0.001,
+            "es_main_training_step_seconds": 0.002,
+            "dfm_training_step_seconds": 0.0012,
+            "prediction_examples_per_second": 10_000_000.0,
             "checkpoint_bytes": 1_000_000,
+            "model_state_bytes": 400_000,
+            "checkpoint_write_seconds": 0.001,
+            "prediction_artifact_bytes_per_row": 32.0,
+            "exposure_artifact_bytes_per_row": 16.0,
             "peak_host_memory_gb": 1.0,
         },
     )
@@ -52,6 +60,7 @@ def test_public_protocol_validation_reports_exact_external_blockers(
     assert set(payload["blockers"]) == {
         "REQUESTED_ACCELERATOR_UNAVAILABLE",
         "REAL_DATA_PILOT_REQUIRED",
+        "REAL_WORKLOAD_INVENTORY_REQUIRED",
         "NO_STEPS_PER_CREDIT_CANDIDATE_FITS_CAPS",
     }
     assert (

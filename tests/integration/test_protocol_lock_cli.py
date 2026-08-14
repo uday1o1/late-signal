@@ -151,12 +151,20 @@ def _feasibility(protocol_sha256: str, matrix: dict[str, int]) -> dict[str, Any]
         "retained_disk": True,
     }
     return {
+        "feasibility_model_version": 2,
         "status": "passed",
         "protocol_sha256": protocol_sha256,
         "blockers": [],
         "matrix": matrix,
         "benchmark": {"requested_device_available": True},
-        "real_data_pilot": {"status": "measured"},
+        "real_data_pilot": {
+            "status": "measured",
+            "workload_inventory": {
+                "total_click_rows_days_0_89": 1_000,
+                "selection_rows_days_25_34": 100,
+                "final_rows_days_65_89": 250,
+            },
+        },
         "selected_steps_per_credit": 500,
         "projections": [
             {

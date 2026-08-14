@@ -156,6 +156,7 @@ class ProtocolDefinition(StrictModel):
 
 class PilotConfig(StrictModel):
     prepared_root: str
+    execution_host_has_source_artifacts: Literal[False]
     max_click_days: int = Field(gt=0, le=2)
     benchmark_examples: int = Field(gt=0, le=100_000)
     benchmark_batch_size: int = Field(gt=0, le=2048)
@@ -163,6 +164,7 @@ class PilotConfig(StrictModel):
     assumed_source_archive_gb: float = Field(gt=0)
     assumed_expanded_source_gb: float = Field(gt=0)
     assumed_prepared_data_gb: float = Field(gt=0)
+    assumed_runtime_feature_cache_gb: float = Field(gt=0)
     temporary_margin_gb: float = Field(gt=0)
     assumed_host_memory_gb: float = Field(gt=0)
 

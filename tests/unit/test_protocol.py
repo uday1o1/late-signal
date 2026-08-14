@@ -5,9 +5,43 @@ from pathlib import Path
 import pytest
 import yaml
 
-from latesignal.contracts.protocol import load_final_protocol
+from latesignal.contracts.protocol import ResourceCaps, load_final_protocol
 from latesignal.errors import ConfigurationError
-from latesignal.experiments.estimate import enumerate_matrix, estimate_protocol
+from latesignal.experiments.estimate import (
+    _worst_case_workload,
+    enumerate_matrix,
+    estimate_protocol,
+)
+
+
+def _benchmark(*, checkpoint_bytes: int = 1_000_000) -> dict[str, object]:
+    return {
+        "requested_device": "cpu",
+        "measured_device": "cpu",
+        "requested_device_available": True,
+        "training_examples_per_second": 10_000_000.0,
+        "training_step_seconds": 0.0001,
+        "es_main_training_step_seconds": 0.0002,
+        "dfm_training_step_seconds": 0.00012,
+        "prediction_examples_per_second": 10_000_000.0,
+        "checkpoint_bytes": checkpoint_bytes,
+        "model_state_bytes": 0,
+        "checkpoint_write_seconds": 0.001,
+        "prediction_artifact_bytes_per_row": 0.0,
+        "exposure_artifact_bytes_per_row": 0.0,
+        "peak_host_memory_gb": 1.0,
+    }
+
+
+def _pilot() -> dict[str, object]:
+    return {
+        "status": "measured",
+        "workload_inventory": {
+            "total_click_rows_days_0_89": 1_000,
+            "selection_rows_days_25_34": 100,
+            "final_rows_days_65_89": 250,
+        },
+    }
 
 
 def _write_configs(tmp_path: Path, *, narrowed: bool = False) -> Path:
@@ -59,6 +93,19 @@ def test_locked_protocol_enumerates_the_exact_authored_matrix(tmp_path: Path) ->
         protocol.selection_defaults.last_credit_day,
     ) == (55, 64)
     assert protocol.final_training.initialization_steps == 500
+    assert _worst_case_workload(protocol, final, matrix) == {
+        "selection_runs": 50,
+        "final_online_runs": 33,
+        "initialization_runs": 83,
+        "initialization_steps": 41_500,
+        "base_core_credits": 1_285,
+        "es_core_credits": 421,
+        "dfm_core_credits": 177,
+        "auxiliary_steps": 109_200,
+        "one_model_checkpoint_writes": 1_578,
+        "three_model_checkpoint_writes": 471,
+        "equivalent_single_model_checkpoint_writes": 2_991,
+    }
 
 
 def test_protocol_refuses_a_silently_narrowed_candidate_set(tmp_path: Path) -> None:
@@ -75,19 +122,8 @@ def test_estimator_selects_largest_quality_independent_candidate_that_fits(
 ) -> None:
     path = _write_configs(tmp_path)
     final, protocol, protocol_sha256 = load_final_protocol(path)
-    benchmark = {
-        "requested_device": "cpu",
-        "measured_device": "cpu",
-        "requested_device_available": True,
-        "training_examples_per_second": 10_000_000.0,
-        "checkpoint_bytes": 1_000_000,
-        "peak_host_memory_gb": 1.0,
-    }
-    monkeypatch.setattr("latesignal.experiments.estimate._benchmark", lambda _: benchmark)
-    monkeypatch.setattr(
-        "latesignal.experiments.estimate._real_pilot",
-        lambda *_: {"status": "unavailable"},
-    )
+    monkeypatch.setattr("latesignal.experiments.estimate._benchmark", lambda _: _benchmark())
+    monkeypatch.setattr("latesignal.experiments.estimate._real_pilot", lambda *_: _pilot())
 
     result = estimate_protocol(
         final,
@@ -108,19 +144,11 @@ def test_estimator_models_rolling_checkpoint_storage(
     path = _write_configs(tmp_path)
     final, protocol, protocol_sha256 = load_final_protocol(path)
     checkpoint_bytes = 1024**3
-    benchmark = {
-        "requested_device": "cpu",
-        "measured_device": "cpu",
-        "requested_device_available": True,
-        "training_examples_per_second": 10_000_000.0,
-        "checkpoint_bytes": checkpoint_bytes,
-        "peak_host_memory_gb": 1.0,
-    }
-    monkeypatch.setattr("latesignal.experiments.estimate._benchmark", lambda _: benchmark)
     monkeypatch.setattr(
-        "latesignal.experiments.estimate._real_pilot",
-        lambda *_: {"status": "unavailable"},
+        "latesignal.experiments.estimate._benchmark",
+        lambda _: _benchmark(checkpoint_bytes=checkpoint_bytes),
     )
+    monkeypatch.setattr("latesignal.experiments.estimate._real_pilot", lambda *_: _pilot())
 
     result = estimate_protocol(
         final,
@@ -131,10 +159,64 @@ def test_estimator_models_rolling_checkpoint_storage(
 
     projection = result["projections"][0]
     report_gb = 89 * 250_000 / 1024**3
-    assert projection["working_disk_gb"] == pytest.approx(15.5 + 3.0 + report_gb)
+    assert projection["working_disk_gb"] == pytest.approx(9.5 + 9.0 + report_gb)
     assert projection["retained_disk_gb"] == pytest.approx(report_gb)
     assert result["assumptions"]["checkpoint_working_copies"] == 3
     assert result["assumptions"]["completed_checkpoints_retained"] == 0
+    assert result["assumptions"]["execution_host_has_source_artifacts"] is False
+
+
+def test_estimator_rejects_k500_after_including_real_workload_classes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = _write_configs(tmp_path)
+    final, protocol, protocol_sha256 = load_final_protocol(path)
+    final = final.model_copy(
+        update={
+            "caps": ResourceCaps(
+                max_runs=89,
+                max_gpu_hours=4.0,
+                max_working_disk_gb=25.0,
+                max_retained_disk_gb=2.0,
+            )
+        }
+    )
+    benchmark = _benchmark(checkpoint_bytes=1_226_380_695)
+    benchmark.update(
+        {
+            "training_step_seconds": 0.00742,
+            "es_main_training_step_seconds": 0.012,
+            "dfm_training_step_seconds": 0.008,
+            "prediction_examples_per_second": 3_677_150.0,
+            "model_state_bytes": 409_000_000,
+            "checkpoint_write_seconds": 1.067,
+            "prediction_artifact_bytes_per_row": 25.0,
+            "exposure_artifact_bytes_per_row": 15.0,
+        }
+    )
+    pilot = {
+        "status": "measured",
+        "workload_inventory": {
+            "total_click_rows_days_0_89": 15_924_859,
+            "selection_rows_days_25_34": 1_770_000,
+            "final_rows_days_65_89": 4_420_000,
+        },
+    }
+    monkeypatch.setattr("latesignal.experiments.estimate._benchmark", lambda _: benchmark)
+    monkeypatch.setattr("latesignal.experiments.estimate._real_pilot", lambda *_: pilot)
+
+    result = estimate_protocol(
+        final,
+        protocol,
+        config_path=path,
+        protocol_sha256=protocol_sha256,
+    )
+
+    assert result["status"] == "passed"
+    assert result["selected_steps_per_credit"] == 250
+    assert result["projections"][2]["cap_checks"]["compute_hours"] is False
+    assert result["projections"][1]["fits_caps"] is True
+    assert result["worst_case_workload"]["auxiliary_steps"] == 109_200
 
 
 def test_real_data_gate_refuses_cross_batch_extrapolation(tmp_path: Path) -> None:

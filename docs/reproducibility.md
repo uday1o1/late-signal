@@ -63,8 +63,23 @@ uv run latesignal protocol validate configs/experiments/final.yaml \
 
 The command must exit successfully and choose the largest allowed steps-per-credit value that fits every cap.
 It does not use a quality metric for that choice.
+The projection includes shared initialization, method-specific core training, worst-case ES-DFM auxiliary training, all primary and intermediate prediction passes, checkpoint writes, rolling ES-DFM checkpoint state, pending stage ledgers, and aggregate retention.
+The remote execution host receives prepared data but not the licensed archive or expanded source file, which remain on the acquisition machine.
 
 Selection runs use outcomes only for click days 25 through 34 and record every attempted candidate.
+Run or resume the frozen 36 + 8 + 6 selection graph with the feasibility-selected budget:
+
+```bash
+uv run latesignal selection run configs/experiments/final.yaml \
+  --data-manifest data/processed/manifests/preparation.json \
+  --feature-config configs/features.yaml \
+  --cache-root data/runtime-features \
+  --out runs/selection \
+  --steps-per-credit SELECTED_STEPS \
+  --device-uuid GPU_UUID \
+  --json
+```
+
 After the complete selection evidence exists, create the pre-scoring lock:
 
 ```bash
