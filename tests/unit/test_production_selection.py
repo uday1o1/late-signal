@@ -7,12 +7,15 @@ import pyarrow.parquet as pq  # type: ignore[import-untyped]
 import pytest
 import torch
 
+from latesignal.data.manifests import read_json, write_json_atomic
+from latesignal.errors import ConsistencyError
 from latesignal.experiments.checkpoint import CheckpointIdentity, RollingCheckpointStore
 from latesignal.experiments.production_selection import (
     ProductionSelectionController,
     ProductionSelectionPlan,
     SelectionMethod,
 )
+from latesignal.experiments.selection_evaluation import evaluate_selection_candidate
 from latesignal.features.store import FeatureTensorBatch
 from latesignal.models.conversion_mlp import CategoricalSpec
 from latesignal.simulator.production_oracle import SECONDS_PER_DAY, ProductionTruthStore
@@ -48,6 +51,10 @@ class _Features:
 
     def references_for_day(self, day: int) -> np.ndarray:
         return np.flatnonzero(self.click_days == day).astype(np.int32)
+
+    def references_for_ids(self, click_ids: list[bytes]) -> np.ndarray:
+        lookup = {bytes(value): index for index, value in enumerate(self.click_ids)}
+        return np.asarray([lookup[value] for value in click_ids], dtype=np.int32)
 
 
 def _truth(features: _Features) -> ProductionTruthStore:
@@ -149,6 +156,8 @@ def test_selection_controller_seals_retrospective_predictions_before_truth(tmp_p
     assert manifest["credit_days"] == [55, 64]
     assert manifest["credits"] == 10
     assert manifest["core_optimizer_steps"] == 10
+    assert float(manifest["measured_compute_seconds"]) >= 0.0
+    assert int(manifest["parameter_count"]) > 0
     rows = _prediction_rows(tmp_path / "run")
     assert len(rows) == 20
     assert {int(row["click_day"]) for row in rows} == set(range(25, 35))
@@ -228,6 +237,50 @@ def test_esdfm_selection_initializes_auxiliaries_on_day_zero_before_core_credit(
         "q_tn_store",
         "q_dp_store",
     }
+
+
+def test_selection_evaluator_joins_truth_only_after_verifying_seal(tmp_path: Path) -> None:
+    features = _Features()
+    root = tmp_path / "run"
+    _controller(root).run()
+
+    evaluation = evaluate_selection_candidate(
+        root,
+        truth=_truth(features),
+        features=features,
+        require_ranking_eligible=False,
+    )
+    repeated = evaluate_selection_candidate(
+        root,
+        truth=_truth(features),
+        features=features,
+        require_ranking_eligible=False,
+    )
+
+    assert evaluation == repeated
+    assert evaluation["truth_joined"] is True
+    assert evaluation["rows"] == 20
+    metrics = evaluation["metrics"]
+    assert isinstance(metrics, dict)
+    assert metrics["count"] == 20
+
+
+def test_selection_evaluator_refuses_a_forged_prediction_seal(tmp_path: Path) -> None:
+    features = _Features()
+    root = tmp_path / "run"
+    _controller(root).run()
+    seal_path = root / "predictions" / "seal.json"
+    seal = read_json(seal_path)
+    seal["rows"] = 19
+    write_json_atomic(seal_path, seal, overwrite=True)
+
+    with pytest.raises(ConsistencyError, match="seal content"):
+        evaluate_selection_candidate(
+            root,
+            truth=_truth(features),
+            features=features,
+            require_ranking_eligible=False,
+        )
 
 
 def test_publication_selection_plan_rejects_qualification_shortcuts() -> None:

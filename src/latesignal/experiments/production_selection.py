@@ -139,6 +139,22 @@ def _model_sha256(state: dict[str, torch.Tensor]) -> str:
     return digest.hexdigest()
 
 
+def _measured_compute_seconds(compute: dict[str, Any]) -> float:
+    names = (
+        "initialization_seconds",
+        "core_training_seconds",
+        "auxiliary_training_seconds",
+        "prediction_seconds",
+    )
+    total = 0.0
+    for name in names:
+        value = compute.get(name)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ConsistencyError("Selection compute measurements are malformed")
+        total += float(value)
+    return total
+
+
 def _split_component_state(
     name: str,
     state: dict[str, object],
@@ -966,6 +982,12 @@ class ProductionSelectionController:
             raise ConsistencyError("Selection training feature cursor is incomplete")
         evidence = self._predict_and_seal()
         self._write_checkpoint(next_boundary_index=self.next_boundary_index)
+        parameter_count = self.main_trainer.model.parameter_count
+        if self.auxiliary is not None:
+            parameter_count += (
+                self.auxiliary.q_tn.model.parameter_count
+                + self.auxiliary.q_dp.model.parameter_count
+            )
         manifest: dict[str, object] = {
             "version": 1,
             "status": "complete",
@@ -987,6 +1009,8 @@ class ProductionSelectionController:
             "core_optimizer_steps": self.main_trainer.budget.optimizer_steps,
             "core_optimizer_examples": self.main_trainer.budget.optimizer_examples,
             "initialization_model_sha256": self.initialization_model_sha256,
+            "measured_compute_seconds": _measured_compute_seconds(self.compute),
+            "parameter_count": parameter_count,
             "compute": self.compute,
             **evidence,
         }
