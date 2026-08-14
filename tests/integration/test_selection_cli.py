@@ -81,7 +81,9 @@ def test_public_final_command_routes_the_locked_production_inputs(
         captured.update(kwargs)
         return {
             "status": "complete",
-            "completed_count": 33,
+            "completed_count": 39,
+            "online_runs": 33,
+            "offline_runs": 6,
             "manifest_sha256": "a" * 64,
         }
 
@@ -111,7 +113,9 @@ def test_public_final_command_routes_the_locked_production_inputs(
 
     assert result.exit_code == 0, result.stdout
     payload = json.loads(result.stdout)
-    assert payload["completed_count"] == 33
+    assert payload["completed_count"] == 39
+    assert payload["online_runs"] == 33
+    assert payload["offline_runs"] == 6
     assert captured["protocol_lock_path"] == protocol_lock.resolve()
     assert captured["output_root"] == output.resolve()
     assert captured["device_uuid"] == "GPU-test"

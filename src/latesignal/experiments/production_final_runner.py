@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 from pathlib import Path
 from typing import Any
@@ -9,10 +10,15 @@ from typing import Any
 import torch
 
 from latesignal.contracts.protocol import load_final_protocol
+from latesignal.data.manifests import canonical_json_bytes, read_json, write_json_atomic
 from latesignal.errors import ConsistencyError
 from latesignal.experiments.final_coordinator import run_final_online_coordinator
 from latesignal.experiments.final_executor import ProductionFinalExecutor
 from latesignal.experiments.production_final import FinalPlanInputs, final_online_plans
+from latesignal.experiments.production_offline import (
+    ProductionOfflineExecutor,
+    run_offline_references,
+)
 from latesignal.experiments.protocol_lock import (
     verify_locked_final_runtime,
     verify_protocol_lock,
@@ -106,7 +112,38 @@ def run_production_final(
         runtime_identity=runtime_identity,
         device_uuid=device_uuid,
     )
-    manifest = run_final_online_coordinator(inputs, output_root, executor=executor)
-    if manifest.get("status") != "complete" or manifest.get("completed_count") != 33:
+    online = run_final_online_coordinator(inputs, output_root, executor=executor)
+    if online.get("status") != "complete" or online.get("completed_count") != 33:
         raise ConsistencyError("Production final online coordinator did not complete")
-    return manifest
+    offline = run_offline_references(
+        inputs,
+        output_root,
+        executor=ProductionOfflineExecutor(
+            output_root=output_root,
+            features=features,
+            truth=truth,
+            monitoring_mask=monitoring_mask,
+            runtime_identity=runtime_identity,
+        ),
+    )
+    if offline.get("status") != "complete" or offline.get("completed_count") != 6:
+        raise ConsistencyError("Production offline reference coordinator did not complete")
+    payload: dict[str, object] = {
+        "version": 1,
+        "status": "complete",
+        "online_runs": 33,
+        "offline_runs": 6,
+        "completed_count": 39,
+        "online_manifest_sha256": online["manifest_sha256"],
+        "offline_manifest_sha256": offline["manifest_sha256"],
+        "protocol_lock_sha256": lock["lock_sha256"],
+    }
+    payload["manifest_sha256"] = hashlib.sha256(canonical_json_bytes(payload)).hexdigest()
+    path = output_root / "final-manifest.json"
+    if path.exists():
+        stored = read_json(path)
+        if stored != payload:
+            raise ConsistencyError("Immutable combined final manifest changed")
+    else:
+        write_json_atomic(path, payload)
+    return read_json(path)

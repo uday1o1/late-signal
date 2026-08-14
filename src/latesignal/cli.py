@@ -161,7 +161,7 @@ def final_run_command(
     ],
     json_output: JsonOption = False,
 ) -> None:
-    """Run or resume the exact 21 plus 12 final online experiments."""
+    """Run or resume the exact 33 online and six offline final experiments."""
 
     try:
         manifest = run_production_final(
@@ -182,6 +182,8 @@ def final_run_command(
             "status": manifest["status"],
             "out": str(out),
             "completed_count": manifest["completed_count"],
+            "online_runs": manifest["online_runs"],
+            "offline_runs": manifest["offline_runs"],
             "manifest_sha256": manifest["manifest_sha256"],
         },
         json_output,
