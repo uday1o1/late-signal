@@ -1,0 +1,1 @@
+"""Static aggregate-only reporting."""

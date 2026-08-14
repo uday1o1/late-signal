@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 import typer
 import yaml
@@ -28,6 +28,8 @@ from latesignal.experiments.runner import resume_synthetic_experiment, run_synth
 from latesignal.experiments.study_a import run_study_a
 from latesignal.experiments.study_b import run_study_b
 from latesignal.features.policy import load_feature_policy
+from latesignal.reporting.model import load_report_input
+from latesignal.reporting.render import render_report
 
 app = typer.Typer(
     name="latesignal",
@@ -294,6 +296,62 @@ def compare_command(
     except LateSignalError as error:
         _fail(error, json_output)
     _emit({"ok": True, "status": "complete", **result}, json_output)
+
+
+@app.command("report")
+def report_command(
+    run_dir: Annotated[
+        Path,
+        typer.Argument(
+            exists=True,
+            file_okay=False,
+            dir_okay=True,
+            readable=True,
+            resolve_path=True,
+            help="Run directory containing aggregate report-input.json.",
+        ),
+    ],
+    report_format: Annotated[
+        Literal["text", "json", "html"],
+        typer.Option("--format", help="Static report format."),
+    ] = "html",
+    out: Annotated[
+        Path | None,
+        typer.Option(
+            "--out",
+            file_okay=False,
+            dir_okay=True,
+            resolve_path=True,
+            help="New report directory, defaulting to RUN_DIR/report.",
+        ),
+    ] = None,
+    json_output: JsonOption = False,
+) -> None:
+    """Render a static report from strictly aggregate inputs."""
+
+    report_input = run_dir / "report-input.json"
+    output_root = out if out is not None else run_dir / "report"
+    try:
+        report = load_report_input(report_input)
+        manifest = render_report(
+            report,
+            output_root,
+            report_format=report_format,
+            input_path=report_input,
+        )
+    except LateSignalError as error:
+        _fail(error, json_output)
+    _emit(
+        {
+            "ok": True,
+            "status": "complete",
+            "aggregate_only": True,
+            "out": str(output_root),
+            "format": report_format,
+            "manifest_sha256": manifest["manifest_sha256"],
+        },
+        json_output,
+    )
 
 
 @app.command("run")
