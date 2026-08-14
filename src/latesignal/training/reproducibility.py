@@ -89,6 +89,14 @@ def capture_runtime_identity(repository: Path | None = None) -> dict[str, Any]:
 def configure_determinism(seed: int) -> None:
     """Configure deterministic behavior where PyTorch supports it."""
 
+    workspace = os.environ.get("CUBLAS_WORKSPACE_CONFIG")
+    if torch.cuda.is_initialized() and workspace not in {  # type: ignore[no-untyped-call]
+        ":4096:8",
+        ":16:8",
+    }:
+        raise ConsistencyError(
+            "CUBLAS_WORKSPACE_CONFIG must be set before CUDA runtime initialization"
+        )
     os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
     random.seed(seed)
     np.random.seed(seed)
