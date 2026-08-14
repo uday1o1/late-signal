@@ -27,7 +27,7 @@ class SelectionEvaluationFeatures(Protocol):
     def references_for_ids(self, click_ids: list[bytes]) -> NDArray[np.int32]: ...
 
 
-def _verified_manifest(path: Path) -> dict[str, object]:
+def verify_selection_run_manifest(path: Path) -> dict[str, object]:
     manifest = read_json(path)
     expected = manifest.get("manifest_sha256")
     unsigned = {key: value for key, value in manifest.items() if key != "manifest_sha256"}
@@ -70,7 +70,7 @@ def evaluate_selection_candidate(
     """Verify the truth-free seal before reading held-out eventual outcomes."""
 
     root = run_root.resolve()
-    manifest = _verified_manifest(root / "manifest.json")
+    manifest = verify_selection_run_manifest(root / "manifest.json")
     identity = PredictionLedgerIdentity.model_validate(
         read_json(root / "predictions/identity.json")
     )

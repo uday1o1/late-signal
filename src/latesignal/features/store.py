@@ -147,6 +147,10 @@ class RuntimeFeatureStore:
         return self.cache.prepared_manifest_sha256
 
     @property
+    def feature_policy_sha256(self) -> str:
+        return self.cache.policy.canonical_sha256
+
+    @property
     def id_lookup(self) -> dict[bytes, int]:
         if self._id_lookup is None:
             self._id_lookup = self._build_id_lookup()

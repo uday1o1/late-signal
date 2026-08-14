@@ -50,6 +50,7 @@ SelectionMethod = Literal["complete_wait", "fixed_wait", "es_dfm"]
 
 class SelectionFeatureStore(Protocol):
     prepared_manifest_sha256: str
+    feature_policy_sha256: str
     click_ids: NDArray[np.void]
     click_times: NDArray[np.float64]
     click_days: NDArray[np.int16]
@@ -60,6 +61,8 @@ class SelectionFeatureStore(Protocol):
     def tensor_batch(self, references: NDArray[np.integer]) -> FeatureTensorBatch: ...
 
     def references_for_day(self, day: int) -> NDArray[np.int32]: ...
+
+    def references_for_ids(self, click_ids: list[bytes]) -> NDArray[np.int32]: ...
 
 
 class ProductionSelectionPlan(StrictModel):
