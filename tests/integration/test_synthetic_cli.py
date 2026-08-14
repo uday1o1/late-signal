@@ -108,3 +108,34 @@ def test_resume_refuses_tampered_checkpoint_configuration(tmp_path: Path) -> Non
 
     assert result.exit_code == 5
     assert json.loads(result.stdout)["error"] == "INTERNAL_CONSISTENCY_FAILURE"
+
+
+def test_resume_refuses_changed_runtime_identity(tmp_path: Path) -> None:
+    interrupted = tmp_path / "interrupted"
+    first = runner.invoke(
+        app,
+        [
+            "run",
+            str(CONFIG),
+            "--out",
+            str(interrupted),
+            "--stop-after-checkpoints",
+            "1",
+            "--json",
+        ],
+    )
+    assert first.exit_code == 4
+    checkpoint = next((interrupted / "checkpoints").glob("checkpoint-*.json"))
+    payload = read_json(checkpoint)
+    runtime = payload["runtime_identity"]
+    assert isinstance(runtime, dict)
+    runtime["source_tree_sha256"] = "0" * 64
+    write_json_atomic(checkpoint, payload, overwrite=True)
+
+    result = runner.invoke(
+        app,
+        ["resume", str(checkpoint), "--out", str(tmp_path / "refused"), "--json"],
+    )
+
+    assert result.exit_code == 5
+    assert "runtime identity" in json.loads(result.stdout)["message"]

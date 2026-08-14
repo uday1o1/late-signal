@@ -18,6 +18,7 @@ from latesignal.experiments.synthetic import SyntheticFixture, build_synthetic_f
 from latesignal.simulator.checkpoint import read_checkpoint, write_checkpoint
 from latesignal.simulator.engine import EventTimeEngine
 from latesignal.simulator.ledger import audit_event_trace
+from latesignal.training.reproducibility import capture_runtime_identity
 
 
 def _ledger_hash(records: object) -> str:
@@ -42,6 +43,7 @@ def _checkpoint_payload(
     return {
         "created_at": datetime.now(UTC).isoformat(),
         "code_version": __version__,
+        "runtime_identity": capture_runtime_identity(),
         "config": config.as_dict(),
         "config_sha256": config.canonical_sha256,
         "fixture_sha256": fixture.canonical_sha256,
@@ -82,6 +84,7 @@ def _write_outputs(
         "status": "complete" if complete else "interrupted",
         "generated_at": datetime.now(UTC).isoformat(),
         "code_version": __version__,
+        "runtime_identity": capture_runtime_identity(),
         "config_sha256": config.canonical_sha256,
         "fixture_sha256": fixture.canonical_sha256,
         "seed": config.seed,
@@ -162,6 +165,10 @@ def resume_synthetic_experiment(checkpoint_path: Path, output_dir: Path) -> dict
     config = parse_synthetic_config(config_raw)
     if config.canonical_sha256 != checkpoint.get("config_sha256"):
         raise ConsistencyError("Checkpoint configuration hash does not match its contents")
+    if checkpoint.get("code_version") != __version__:
+        raise ConsistencyError("Checkpoint package version does not match the current code")
+    if checkpoint.get("runtime_identity") != capture_runtime_identity():
+        raise ConsistencyError("Checkpoint runtime identity does not match the current stack")
     fixture = build_synthetic_fixture(config)
     if fixture.canonical_sha256 != checkpoint.get("fixture_sha256"):
         raise ConsistencyError("Checkpoint fixture hash does not match the generated fixture")
