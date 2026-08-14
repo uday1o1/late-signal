@@ -54,25 +54,25 @@ class ProductionFinalPlan(StrictModel):
     """One canonical online run derived only from the verified protocol lock."""
 
     version: Literal[1]
-    phase: Literal["final"]
+    phase: Literal["qualification", "final"]
     study: FinalStudy
     run_id: str = Field(pattern=r"^(study-a|study-b)-[0-9a-f]{16}$")
     method: FinalMethod
     scheduler: FinalScheduler
-    seed: Literal[17, 41, 73]
+    seed: int
     wait_days: Literal[1, 3, 7, 14] | None
     learning_rate: float = Field(gt=0.0)
     weight_decay: float = Field(ge=0.0)
     dropout: float = Field(ge=0.0, lt=1.0)
     gradient_norm_clip: float = Field(gt=0.0)
-    initialization_steps: Literal[500]
-    steps_per_credit: Literal[100, 250, 500]
+    initialization_steps: int = Field(gt=0)
+    steps_per_credit: int = Field(gt=0)
     credits: int = Field(gt=0)
-    batch_size: Literal[2048]
+    batch_size: int = Field(gt=0)
     recent_window_days: Literal[1, 3, 7]
     reservoir_capacity: Literal[1_000_000, 5_000_000]
     feature_policy: FeaturePolicyName
-    prediction_batch_size: Literal[65_536]
+    prediction_batch_size: int = Field(gt=0, le=65_536)
     first_decision_day: Literal[31]
     last_decision_day: Literal[89]
     evaluation_first_click_day: Literal[65]
@@ -80,7 +80,7 @@ class ProductionFinalPlan(StrictModel):
     intermediate_budget_fractions: tuple[float, ...]
     deployable: bool
     ranking_eligible: bool
-    device: Literal["cuda"]
+    device: Literal["cpu", "cuda"]
     protocol_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     protocol_lock_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     selection_decisions_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -109,6 +109,15 @@ class ProductionFinalPlan(StrictModel):
             or oracle
         ):
             raise ValueError("Study B requires the selected delayed method and 12-credit policy")
+        if self.phase == "final" and (
+            self.seed not in _FINAL_SEEDS
+            or self.initialization_steps != 500
+            or self.steps_per_credit not in {100, 250, 500}
+            or self.batch_size != 2048
+            or self.prediction_batch_size != 65_536
+            or self.device != "cuda"
+        ):
+            raise ValueError("Publication final plan violates the authored training protocol")
         return self
 
     @property
