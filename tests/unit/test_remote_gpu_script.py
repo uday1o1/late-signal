@@ -34,3 +34,10 @@ def test_remote_gpu_script_verifies_the_preparation_manifest() -> None:
 
     assert 'Path("data/processed/manifests/preparation.json")' in source
     assert '_verify_prepared_data(Path("data/processed"))' not in source
+
+
+def test_remote_gpu_script_preserves_immutable_results_per_revision() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+
+    assert "gpu${GPU_INDEX}-${LOCAL_HEAD:0:12}.json" in source
+    assert 'RESULT_RELATIVE="runs/feasibility/gpu${GPU_INDEX}.json"' not in source

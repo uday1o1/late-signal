@@ -87,7 +87,7 @@ remote_home="$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$SSH_HOST" 'printf %s 
 [[ "$remote_home" =~ ^/[A-Za-z0-9._/-]+$ && "$remote_home" != *..* ]] || die \
   "remote home path contains unsupported characters"
 readonly REMOTE_ROOT="$remote_home/late-signal"
-readonly RESULT_RELATIVE="runs/feasibility/gpu${GPU_INDEX}.json"
+readonly RESULT_RELATIVE="runs/feasibility/gpu${GPU_INDEX}-${LOCAL_HEAD:0:12}.json"
 
 ssh "$SSH_HOST" bash -s -- \
   "$REMOTE_ROOT" \
