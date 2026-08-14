@@ -64,6 +64,16 @@ Resume an interrupted run into a new directory with:
 uv run latesignal resume runs/synthetic/checkpoints/CHECKPOINT.json --out runs/resumed --json
 ```
 
+Reproduce the exact checked-in synthetic evidence and verify every ledger hash, count, and metric with:
+
+```console
+uv run latesignal reproduce results/published/synthetic-reproduction.json \
+  --out runs/reproduced \
+  --json
+```
+
+The command also refuses a source-tree, configuration, or dependency-lock mismatch.
+
 ## Compare delayed-label methods
 
 Run every Study A method through one shared initialization checkpoint, fixed schedule, and exactly reconciled core budget:

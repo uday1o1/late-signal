@@ -1,0 +1,31 @@
+{
+  "config": "configs/experiments/synthetic.yaml",
+  "config_sha256": "0a8c8014aa992868510f008ca1e9a7d5a25a1ca8d220cedcf721b4a5aa71f075",
+  "dependency_lock_sha256": "eac69612250a1fb23580221f1356bbd86d3f7c68cdb1115708c08271aa506f35",
+  "expected": {
+    "counts": {
+      "available_records": 6,
+      "checkpoints": 2,
+      "credits": 2,
+      "optimizer_examples": 20,
+      "optimizer_steps": 8,
+      "predictions": 6
+    },
+    "ledger_sha256": {
+      "availability": "e7788eb6e9d832855a87774a922f10b08672b7c958380741b7f8c50b6b5b67b9",
+      "credits": "7eabbbaa06fdf75043ad305bb78eb1f632ff51593d1e3a5aeb943b2d8e4a2707",
+      "events": "fc9250382b3d5de64a6a708f7a490d533b8762f1e4291f3f8c46ca121f224518",
+      "exposures": "f2943727cfef2a6101f230fa54adbf5655403faec6d1e909bafaad48561af908",
+      "predictions": "50e35c65078d05cd360c8f63bd854bcd14295e624f3a9240d87cbce717070b6c"
+    },
+    "metrics": {
+      "brier_score": 0.24281936191743045,
+      "count": 6,
+      "log_loss": 0.6784697858888467,
+      "positives": 3
+    }
+  },
+  "kind": "synthetic-run",
+  "source_tree_sha256": "5aa6bbafe313bd3ee35c5ff0eff3b106fc30d1ecf6282e21073870e0f0dc150e",
+  "version": 1
+}

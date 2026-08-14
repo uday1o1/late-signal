@@ -68,6 +68,24 @@ def test_public_reproduce_matches_every_locked_synthetic_output(tmp_path: Path) 
     assert reproduction["observed"] == reproduction["expected"]
 
 
+def test_checked_in_synthetic_manifest_reproduces(tmp_path: Path) -> None:
+    output = tmp_path / "published-reproduction"
+
+    result = runner.invoke(
+        app,
+        [
+            "reproduce",
+            "results/published/synthetic-reproduction.json",
+            "--out",
+            str(output),
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    assert read_json(output / "reproduction.json")["status"] == "complete"
+
+
 def test_public_reproduce_retains_evidence_when_expected_output_is_wrong(
     tmp_path: Path,
 ) -> None:

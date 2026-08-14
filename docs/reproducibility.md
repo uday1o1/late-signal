@@ -17,9 +17,12 @@ uv run pytest
 uv run latesignal run configs/experiments/synthetic.yaml --out runs/synthetic
 uv run latesignal run configs/experiments/study_a.synthetic.yaml --out runs/study-a
 uv run latesignal run configs/experiments/study_b.synthetic.yaml --out runs/study-b
+uv run latesignal reproduce results/published/synthetic-reproduction.json \
+  --out runs/reproduced
 ```
 
 Hosted CI performs the same formatting, lint, typing, and test checks without downloading the licensed dataset or requiring a GPU.
+The checked-in synthetic manifest binds the source tree, dependency lock, configuration, five public ledgers, execution counts, and final metrics.
 
 ## Licensed data workflow
 
