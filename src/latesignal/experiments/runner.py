@@ -17,6 +17,7 @@ from latesignal.evaluation.metrics import binary_metrics
 from latesignal.experiments.synthetic import SyntheticFixture, build_synthetic_fixture
 from latesignal.simulator.checkpoint import read_checkpoint, write_checkpoint
 from latesignal.simulator.engine import EventTimeEngine
+from latesignal.simulator.ledger import audit_event_trace
 
 
 def _ledger_hash(records: object) -> str:
@@ -61,6 +62,7 @@ def _write_outputs(
     credit_values = [record.as_dict() for record in engine.credit_ledger]
     exposure_values = [record.as_dict() for record in engine.exposure_ledger]
     event_values = engine.event_trace
+    audit_event_trace(event_values)
     ledgers: dict[str, object] = {
         "predictions": prediction_values,
         "availability": availability_values,
