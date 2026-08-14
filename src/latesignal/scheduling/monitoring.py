@@ -5,7 +5,9 @@ from __future__ import annotations
 import math
 from dataclasses import asdict, dataclass
 
+import numpy as np
 import xxhash
+from numpy.typing import NDArray
 
 from latesignal.errors import ConsistencyError
 
@@ -67,6 +69,21 @@ def is_monitoring_member(click_id: str, seed: int) -> bool:
     """Apply the locked deterministic 10 percent monitoring assignment."""
 
     return xxhash.xxh64_intdigest(click_id.encode(), seed=seed) % 10 == 0
+
+
+def monitoring_membership_mask(
+    click_ids: NDArray[np.void],
+    seed: int,
+) -> NDArray[np.bool_]:
+    """Vectorize the authored assignment while preserving canonical hex IDs."""
+
+    if click_ids.ndim != 1:
+        raise ValueError("Monitoring click IDs must be one-dimensional")
+    return np.fromiter(
+        (is_monitoring_member(bytes(value).hex(), seed) for value in click_ids),
+        dtype=np.bool_,
+        count=click_ids.size,
+    )
 
 
 def calibration_evidence(

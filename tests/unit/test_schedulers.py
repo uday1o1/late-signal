@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import pytest
 
 from latesignal.contracts.records import TrainingRecord
@@ -14,6 +15,7 @@ from latesignal.scheduling.monitoring import (
     MonitoringExample,
     calibration_evidence,
     is_monitoring_member,
+    monitoring_membership_mask,
 )
 from latesignal.training.sampler import DeterministicSampler
 
@@ -52,6 +54,15 @@ def _cohort(day: int, *, shifted: bool) -> list[MonitoringExample]:
         )
         for index, click_id in enumerate(identifiers)
     ]
+
+
+def test_vectorized_monitoring_membership_preserves_binary_click_ids() -> None:
+    raw = [b"a" * 31 + b"\x00", b"b" * 32, b"c" * 32]
+    click_ids = np.asarray(raw, dtype="V32")
+
+    mask = monitoring_membership_mask(click_ids, SEED)
+
+    assert mask.tolist() == [is_monitoring_member(value.hex(), SEED) for value in raw]
 
 
 def test_credit_windows_retain_final_partial_window() -> None:
