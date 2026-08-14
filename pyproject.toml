@@ -20,7 +20,7 @@ dependencies = [
   "PyYAML>=6.0.2,<7",
   "scikit-learn>=1.7,<2",
   "torch>=2.11,<2.12",
-  "typer>=0.21.1,<0.22",
+  "typer>=0.27.1,<0.28",
   "xxhash>=3.5,<4",
 ]
 
