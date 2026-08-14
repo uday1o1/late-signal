@@ -1,0 +1,63 @@
+name: Trusted GPU smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: latesignal-gpu-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  synthetic-gpu-smoke:
+    name: Bounded CUDA qualification
+    runs-on:
+      - self-hosted
+      - linux
+      - x64
+      - nvidia-gpu
+    timeout-minutes: 30
+    env:
+      RUN_ROOT: ${{ runner.temp }}/latesignal-gpu-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Check out the trusted revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pinned uv and Python
+        uses: astral-sh/setup-uv@ae62891fec2bb8e7d6c99fc78c9fec3a63790f8d # v10.0.0
+        with:
+          version: 0.11.23
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Synchronize the locked environment
+        run: uv sync --frozen --all-groups
+
+      - name: Record available NVIDIA hardware
+        run: nvidia-smi
+
+      - name: Run the bounded public CUDA path
+        run: |
+          mkdir -p "$RUN_ROOT"
+          uv run latesignal protocol validate configs/experiments/gpu_smoke.yaml \
+            --out "$RUN_ROOT/feasibility.json" \
+            --json
+
+      - name: Run deterministic model and method smoke tests
+        run: |
+          uv run pytest \
+            tests/unit/test_shared_training.py \
+            tests/unit/test_methods.py
+
+      - name: Clean only this workflow run directory
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          expected="${{ runner.temp }}/latesignal-gpu-${{ github.run_id }}-${{ github.run_attempt }}"
+          test "$RUN_ROOT" = "$expected"
+          rm -rf -- "$RUN_ROOT"

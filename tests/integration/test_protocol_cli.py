@@ -12,6 +12,7 @@ runner = CliRunner()
 
 
 def test_public_protocol_validation_reports_exact_external_blockers(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -32,7 +33,14 @@ def test_public_protocol_validation_reports_exact_external_blockers(
 
     result = runner.invoke(
         app,
-        ["protocol", "validate", "configs/experiments/final.yaml", "--json"],
+        [
+            "protocol",
+            "validate",
+            "configs/experiments/final.yaml",
+            "--out",
+            str(tmp_path / "feasibility.json"),
+            "--json",
+        ],
     )
 
     assert result.exit_code == 1, result.stdout
@@ -47,6 +55,10 @@ def test_public_protocol_validation_reports_exact_external_blockers(
         "REAL_DATA_PILOT_REQUIRED",
         "NO_STEPS_PER_CREDIT_CANDIDATE_FITS_CAPS",
     }
+    assert (
+        json.loads((tmp_path / "feasibility.json").read_text(encoding="utf-8"))["status"]
+        == "blocked"
+    )
 
 
 def test_invalid_protocol_error_is_machine_readable(tmp_path: Path) -> None:

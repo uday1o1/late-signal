@@ -1,0 +1,59 @@
+name: CPU CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Python 3.12 verification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pinned uv and Python
+        uses: astral-sh/setup-uv@ae62891fec2bb8e7d6c99fc78c9fec3a63790f8d # v10.0.0
+        with:
+          version: 0.11.23
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Synchronize the locked environment
+        run: uv sync --frozen --all-groups
+
+      - name: Verify formatting
+        run: uv run ruff format --check .
+
+      - name: Run lint
+        run: uv run ruff check .
+
+      - name: Run strict typing
+        run: uv run mypy
+
+      - name: Run CPU tests
+        run: uv run pytest
+
+      - name: Guard restricted and generated roots
+        shell: bash
+        run: |
+          tracked=$(git ls-files data runs checkpoints artifacts reports)
+          if [[ -n "$tracked" ]]; then
+            echo "Restricted or generated paths are tracked:"
+            echo "$tracked"
+            exit 1
+          fi

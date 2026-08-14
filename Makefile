@@ -7,7 +7,7 @@ lint:
 	uv run ruff check .
 
 typecheck:
-	uv run mypy src
+	uv run mypy
 
 test:
 	uv run pytest

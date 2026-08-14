@@ -132,11 +132,21 @@ def protocol_validate(
             help="Authored final experiment configuration.",
         ),
     ],
+    out: Annotated[
+        Path | None,
+        typer.Option(
+            "--out",
+            file_okay=True,
+            dir_okay=False,
+            resolve_path=True,
+            help="Optional immutable feasibility-result destination.",
+        ),
+    ] = None,
     json_output: JsonOption = False,
 ) -> None:
     """Require the matrix, pilot, accelerator, and authored caps to pass."""
 
-    protocol_estimate(config, None, json_output)
+    protocol_estimate(config, out, json_output)
 
 
 @protocol_app.command("lock")
