@@ -34,6 +34,8 @@ from latesignal.features.policy import FeaturePolicy
 
 
 def _scan_accepted(path: Path, config: DataConfig) -> pl.LazyFrame:
+    if path.suffix == ".parquet":
+        return pl.scan_parquet(path)
     schema: dict[str, Any] = {"raw_row_index": pl.UInt64}
     schema.update({field: pl.String for field in config.schema.fields})
     return pl.scan_csv(
@@ -46,6 +48,32 @@ def _scan_accepted(path: Path, config: DataConfig) -> pl.LazyFrame:
         low_memory=True,
         rechunk=False,
         truncate_ragged_lines=False,
+    )
+
+
+def _sort_accepted_rows(
+    source: Path,
+    destination: Path,
+    config: DataConfig,
+    *,
+    batch_rows: int,
+) -> None:
+    """External-sort accepted rows by event time with a stable source-row tie break."""
+
+    (
+        _scan_accepted(source, config)
+        .with_columns(
+            pl.col("click_timestamp").cast(pl.Float64, strict=True).alias("__click_time_sort")
+        )
+        .sort(["__click_time_sort", "raw_row_index"])
+        .drop("__click_time_sort")
+        .sink_parquet(
+            destination,
+            compression="zstd",
+            row_group_size=batch_rows,
+            maintain_order=True,
+            engine="streaming",
+        )
     )
 
 
@@ -312,8 +340,9 @@ def prepare_data(
     assert isinstance(time_info, dict)
     assert isinstance(click_info, dict)
     assert isinstance(quarantine_info, dict)
-    if click_info.get("monotonic") is not True:
-        raise DataArtifactError("Preparation requires monotonic click order for past-only history")
+    source_monotonic = click_info.get("monotonic")
+    if not isinstance(source_monotonic, bool):
+        raise ConsistencyError("Inspection manifest has no click-order audit result")
     archive_path_raw = lock.get("archive_path")
     if not isinstance(archive_path_raw, str):
         raise ConsistencyError("Artifact lock has no archive path")
@@ -366,8 +395,17 @@ def prepare_data(
             accepted_expected,
             quarantined_expected,
         )
+        ordered_path = sanitized_path
+        if not source_monotonic:
+            ordered_path = stage / "accepted-chronological.parquet"
+            _sort_accepted_rows(
+                sanitized_path,
+                ordered_path,
+                config,
+                batch_rows=batch_rows,
+            )
         statistics = fit_numeric_statistics(
-            sanitized_path,
+            ordered_path,
             config,
             policy,
             seconds_per_raw_unit=float(multiplier),
@@ -386,7 +424,7 @@ def prepare_data(
         truth_count = 0
         last_click_seconds: float | None = None
         for part, batch in enumerate(
-            _scan_accepted(sanitized_path, config).collect_batches(
+            _scan_accepted(ordered_path, config).collect_batches(
                 chunk_size=batch_rows,
                 maintain_order=True,
                 engine="streaming",
@@ -481,6 +519,12 @@ def prepare_data(
                 "engine": "polars",
                 "batch_rows": batch_rows,
                 "source_materialized_in_memory": False,
+                "source_click_time_monotonic": source_monotonic,
+                "chronological_sort": {
+                    "applied": not source_monotonic,
+                    "keys": ["click_timestamp", "raw_row_index"],
+                    "engine": "streaming",
+                },
             },
             "numeric_statistics": {
                 "fit_click_days": [0, policy.burn_in_last_day],

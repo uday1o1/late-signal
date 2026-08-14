@@ -186,3 +186,83 @@ def test_prepare_refuses_to_overwrite_published_stores(
 
     assert repeated.exit_code == 5
     assert json.loads(repeated.stdout)["error"] == "INTERNAL_CONSISTENCY_FAILURE"
+
+
+def test_prepare_external_sorts_an_unsorted_source(
+    tmp_path: Path, trusted_unsorted_config: Path
+) -> None:
+    data_root = tmp_path / "raw"
+    processed = tmp_path / "processed"
+    inspection = processed / "manifests" / "inspection.json"
+    quarantine = processed / "quarantine" / "rejected.jsonl"
+    assert (
+        runner.invoke(
+            app,
+            [
+                "data",
+                "fetch",
+                "--accept-license",
+                "--config",
+                str(trusted_unsorted_config),
+                "--data-root",
+                str(data_root),
+            ],
+        ).exit_code
+        == 0
+    )
+    inspected = runner.invoke(
+        app,
+        [
+            "data",
+            "inspect",
+            "--config",
+            str(trusted_unsorted_config),
+            "--data-root",
+            str(data_root),
+            "--out",
+            str(inspection),
+            "--quarantine",
+            str(quarantine),
+            "--json",
+        ],
+    )
+    assert inspected.exit_code == 0, inspected.stdout
+    assert read_json(inspection)["click_time"]["monotonic"] is False
+
+    prepared = runner.invoke(
+        app,
+        [
+            "data",
+            "prepare",
+            "--config",
+            str(trusted_unsorted_config),
+            "--features",
+            str(FEATURE_POLICY),
+            "--data-root",
+            str(data_root),
+            "--inspection",
+            str(inspection),
+            "--out",
+            str(processed),
+            "--batch-rows",
+            "2",
+            "--json",
+        ],
+    )
+
+    assert prepared.exit_code == 0, prepared.stdout
+    features = pl.read_parquet(sorted((processed / "features").rglob("*.parquet"))).sort(
+        "click_time_seconds"
+    )
+    assert features["click_time_seconds"].to_list() == [
+        float(100),
+        float(100 + 44 * 86_400),
+        float(100 + 89 * 86_400),
+    ]
+    streaming = read_json(processed / "manifests" / "preparation.json")["streaming"]
+    assert streaming["source_click_time_monotonic"] is False
+    assert streaming["chronological_sort"] == {
+        "applied": True,
+        "engine": "streaming",
+        "keys": ["click_timestamp", "raw_row_index"],
+    }

@@ -106,3 +106,18 @@ def valid_archive(tmp_path: Path) -> Path:
 def trusted_config(tmp_path: Path, valid_archive: Path) -> Path:
     digest = hashlib.sha256(valid_archive.read_bytes()).hexdigest()
     return write_config(tmp_path / "data.yaml", valid_archive, expected_sha256=digest)
+
+
+@pytest.fixture
+def trusted_unsorted_config(tmp_path: Path) -> Path:
+    base = 100
+    chronological = [
+        raw_row(sale=0, amount=-1, delay=-1, click=base, suffix="first"),
+        raw_row(sale=0, amount=-1, delay=-1, click=base + 44 * 86_400, suffix="middle"),
+        raw_row(sale=1, amount=10, delay=86_400, click=base + 89 * 86_400, suffix="last"),
+    ]
+    rows = [chronological[2], chronological[0], chronological[1]]
+    data = ("\t".join(FIELDS) + "\n" + "\n".join(rows) + "\n").encode()
+    archive = write_archive(tmp_path / "unsorted.tar.gz", data)
+    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    return write_config(tmp_path / "unsorted-data.yaml", archive, expected_sha256=digest)

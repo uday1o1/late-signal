@@ -17,7 +17,9 @@ Later models allocate separate embedding tables per field, so equal numeric buck
 The inspected `-1` sentinel becomes a missing indicator and a zero standardized value.
 Clipping quantiles, clipped means, and clipped scales are fit only on click days 0 through 14 and recorded in the preparation manifest.
 
-Cold user, cold product, and prior-click counts are calculated while accepted rows are streamed in monotonic click order.
+The official source is not globally ordered by click timestamp.
+Preparation uses Polars' streaming engine to sort accepted rows by numeric click timestamp with the original raw-row index as the deterministic tie breaker.
+Cold user, cold product, and prior-click counts are calculated while the resulting chronological batches are streamed.
 The current row is classified from counters before those counters are incremented.
 These fields support evaluation slices and are not part of the V1 model allowlist.
 

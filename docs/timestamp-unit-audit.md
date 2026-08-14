@@ -19,3 +19,18 @@ This exact rule is recorded in the inspection manifest and is reused by later pr
 Malformed rows and label-delay inconsistencies are written to the quarantine report by zero-based raw data-row index and reason code.
 The inspector asserts that accepted rows plus quarantined rows equals parsed data rows.
 Duplicate raw rows are counted but remain accepted when otherwise valid.
+
+## Observed official artifact audit
+
+The reviewed official archive has SHA-256 `b49b4135b8564235eba04f6400e663f5456b1a153f49ff504501923a9f47dbf5` and contains a 6,426,808,162-byte data member with SHA-256 `a2ee46feec6008f901ab1ce5e51a44b591b5194285ef86a141b5cc54dbde0567`.
+The complete inspection parsed 15,995,634 data rows, accepted 15,924,859 rows, and quarantined 70,775 rows.
+The reconciliation gate passed exactly.
+The quarantine reasons were 65,417 empty `product_title` values and 5,380 inconsistent sale-delay combinations.
+
+Only the `1` second-per-raw-unit candidate passed.
+The accepted click span was 90.999988 days and the maximum accepted positive delay was 29.974745 days.
+The other millisecond, microsecond, and nanosecond candidates failed the click-span constraint.
+
+The official member is not globally ordered by click time and contains 7,954,968 adjacent order violations.
+The inspector records every violating raw-row index.
+Preparation therefore performs a deterministic bounded-memory sort by numeric click timestamp and then original raw-row index before calculating any past-only feature.
