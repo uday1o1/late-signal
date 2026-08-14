@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import math
 
 import numpy as np
@@ -215,3 +216,31 @@ def test_sampler_restore_and_training_ledgers_reconcile_exactly() -> None:
         "optimizer_examples": 8,
     }
     assert len(trainer.exposures) == 8
+
+
+def test_sampler_retains_exact_lowest_priority_reservoir_without_per_add_sorting() -> None:
+    sampler = DeterministicSampler(
+        seed=17,
+        recent_window_seconds=5,
+        reservoir_capacity=3,
+    )
+    records = [_record(index, available_at=index) for index in range(100)]
+    for index, record in enumerate(records):
+        sampler.add(record, simulator_time=index)
+    sampler.sample(simulator_time=200, batch_size=8)
+
+    state = sampler.state_dict()
+    retained = state["reservoir_records"]
+    assert isinstance(retained, list)
+    actual = {str(item["record_id"]) for item in retained if isinstance(item, dict)}
+    expected = {
+        record.record_id
+        for record in sorted(
+            records,
+            key=lambda item: int.from_bytes(
+                hashlib.sha256(f"17:{item.record_id}".encode()).digest()
+            ),
+        )[:3]
+    }
+    assert state["recent_records"] == []
+    assert actual == expected
