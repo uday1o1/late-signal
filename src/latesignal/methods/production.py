@@ -262,8 +262,13 @@ class PackedDelayedMethod:
     def _emit_due(self, boundary: float, pending: _PendingRecords) -> None:
         if self.wait_seconds is None:
             return
-        due_times = self.click_times[: self.click_cursor] + self.wait_seconds
-        end = int(np.searchsorted(due_times, boundary, side="right"))
+        end = int(
+            np.searchsorted(
+                self.click_times[: self.click_cursor],
+                boundary - self.wait_seconds,
+                side="right",
+            )
+        )
         refs = np.arange(self.due_cursor, end, dtype=np.int32)
         if refs.size:
             positive_after_due = (self.outcome_state[refs] != _POSITIVE) | (
@@ -286,8 +291,13 @@ class PackedDelayedMethod:
     ) -> tuple[int, int]:
         if self.name not in {"complete_wait", "es_dfm"}:
             return 0, 0
-        maturity_times = self.click_times[: self.click_cursor] + self.attribution_seconds
-        end = int(np.searchsorted(maturity_times, boundary, side="right"))
+        end = int(
+            np.searchsorted(
+                self.click_times[: self.click_cursor],
+                boundary - self.attribution_seconds,
+                side="right",
+            )
+        )
         refs = np.arange(self.maturity_cursor, end, dtype=np.int32)
         if refs.size == 0:
             self.maturity_cursor = end
@@ -443,8 +453,8 @@ class PackedDelayedMethod:
                 if self.wait_seconds is None
                 else int(
                     np.searchsorted(
-                        self.click_times[:click_cursor] + self.wait_seconds,
-                        float(last_time),
+                        self.click_times[:click_cursor],
+                        float(last_time) - self.wait_seconds,
                         side="right",
                     )
                 )
@@ -452,8 +462,8 @@ class PackedDelayedMethod:
             expected_maturity = (
                 int(
                     np.searchsorted(
-                        self.click_times[:click_cursor] + self.attribution_seconds,
-                        float(last_time),
+                        self.click_times[:click_cursor],
+                        float(last_time) - self.attribution_seconds,
                         side="right",
                     )
                 )
