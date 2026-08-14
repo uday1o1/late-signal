@@ -10,6 +10,7 @@ import torch
 from latesignal.errors import ConsistencyError
 from latesignal.experiments.checkpoint import CheckpointIdentity
 from latesignal.experiments.final_evaluation import evaluate_final_run
+from latesignal.experiments.final_executor import ProductionFinalExecutor
 from latesignal.experiments.production_final import ProductionFinalPlan
 from latesignal.experiments.production_final_controller import ProductionFinalController
 from latesignal.features.store import FeatureTensorBatch
@@ -229,6 +230,40 @@ def test_final_evaluator_verifies_seals_before_truth_join_and_compacts_primary(
     first_part.write_bytes(b"forged")
     with pytest.raises(ConsistencyError):
         evaluate_final_run(root, truth=_truth(features), features=features)
+
+
+def test_final_executor_prunes_only_after_verified_compaction(tmp_path: Path) -> None:
+    root = tmp_path / "final"
+    features = _Features()
+    plan = _plan()
+    monitoring = np.zeros(features.click_days.size, dtype=np.bool_)
+    monitoring[::2] = True
+    executor = ProductionFinalExecutor(
+        output_root=root,
+        features=features,
+        truth=_truth(features),
+        monitoring_mask=monitoring,
+        runtime_identity={
+            "source_tree_sha256": "6" * 64,
+            "dependency_lock_sha256": "7" * 64,
+            "git_commit": "8" * 40,
+            "runtime_sha256": "9" * 64,
+            "git_dirty": False,
+        },
+        device_uuid="cpu-test",
+    )
+
+    result = executor.execute(plan)
+    repeated = executor.execute(plan)
+
+    assert result == repeated
+    run_root = root / "study-a" / "runs" / plan.run_id
+    assert (run_root / "compact" / "primary-probabilities.npy").is_file()
+    assert (run_root / "retention.json").is_file()
+    assert all(
+        not (run_root / name).exists()
+        for name in ("checkpoints", "exposures", "predictions", "snapshots")
+    )
 
 
 def test_final_controller_resume_matches_at_every_checkpoint_boundary(tmp_path: Path) -> None:
