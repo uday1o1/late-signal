@@ -552,8 +552,10 @@ def _emit(value: dict[str, Any], json_output: bool) -> None:
     if json_output:
         typer.echo(json.dumps(value, sort_keys=True))
         return
-    if value.get("ok") is False:
-        typer.echo(f"ERROR {value['error']}: {value['message']}", err=True)
+    error = value.get("error")
+    message = value.get("message")
+    if value.get("ok") is False and isinstance(error, str) and isinstance(message, str):
+        typer.echo(f"ERROR {error}: {message}", err=True)
         details = value.get("details")
         if details:
             typer.echo(json.dumps(details, indent=2, sort_keys=True), err=True)

@@ -3,7 +3,13 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import pytest
+from typer.testing import CliRunner
+
+from latesignal.cli import app
 from latesignal.security.repository import audit_repository
+
+runner = CliRunner()
 
 
 def _git(repository: Path, *arguments: str) -> None:
@@ -89,3 +95,20 @@ def test_repository_audit_rejects_tracked_symlinks_and_extensionless_secrets(
         "SECRET_SIGNATURE",
         "TRACKED_SYMLINK",
     }
+
+
+def test_audit_cli_renders_findings_without_crashing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = _repository(tmp_path)
+    untracked = root / "tests" / "test_untracked.py"
+    untracked.parent.mkdir()
+    untracked.write_text("def test_untracked(): pass\n", encoding="utf-8")
+    monkeypatch.chdir(root)
+
+    result = runner.invoke(app, ["audit"])
+
+    assert result.exit_code == 5
+    assert "UNTRACKED_REQUIRED_SOURCE" in result.stdout
+    assert "Traceback" not in result.stdout
