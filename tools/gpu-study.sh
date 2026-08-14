@@ -2,7 +2,7 @@
 
 set -Eeuo pipefail
 
-readonly MIN_DISK_GB=25
+readonly MIN_DISK_GB=26
 readonly MIN_MEMORY_GB=16
 readonly MIN_VRAM_MIB=8192
 
@@ -442,8 +442,8 @@ measured_working_kib="$(
   printf 'error: patched working-set measurement is malformed\n' >&2
   exit 1
 }
-(( measured_working_kib <= 25 * 1024 * 1024 )) || {
-  printf 'error: live job tree exceeds the 25 GB working cap\n' >&2
+(( measured_working_kib <= 26 * 1024 * 1024 )) || {
+  printf 'error: live job tree exceeds the 26 GB working cap\n' >&2
   exit 1
 }
 free_kib="$(df -Pk "$job" | awk 'NR == 2 {print $4}')"

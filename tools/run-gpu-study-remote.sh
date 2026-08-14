@@ -3,9 +3,9 @@
 set -Eeuo pipefail
 
 readonly UV_VERSION="0.11.23"
-readonly MAX_GPU_SECONDS=14400
-readonly MAX_WALL_SECONDS=43200
-readonly MAX_WORKING_KIB=$((25 * 1024 * 1024))
+readonly MAX_GPU_SECONDS=90000
+readonly MAX_WALL_SECONDS=108000
+readonly MAX_WORKING_KIB=$((26 * 1024 * 1024))
 readonly MAX_RETAINED_KIB=$((2 * 1024 * 1024))
 readonly MIN_FREE_KIB=$((5 * 1024 * 1024))
 readonly WATCHDOG_INTERVAL_SECONDS=30

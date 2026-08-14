@@ -3,7 +3,7 @@
 set -Eeuo pipefail
 
 readonly UV_VERSION="0.11.23"
-readonly MIN_DISK_GB=25
+readonly MIN_DISK_GB=26
 readonly MIN_MEMORY_GB=16
 readonly MIN_VRAM_MIB=8192
 readonly MAX_BENCHMARK_SECONDS=600

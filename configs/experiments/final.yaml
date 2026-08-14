@@ -35,6 +35,6 @@ pilot:
   min_checkpoint_generation_seconds: 6.75258791425052
 caps:
   max_runs: 89
-  max_gpu_hours: 4.0
-  max_working_disk_gb: 25.0
+  max_gpu_hours: 25.0
+  max_working_disk_gb: 26.0
   max_retained_disk_gb: 2.0

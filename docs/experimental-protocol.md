@@ -75,8 +75,8 @@ Only aggregate tables, manifests, and hashes contribute to retained artifact sto
 The final configuration records the resource caps authorized after qualification on the intended workstation:
 
 - 89 total runs.
-- 4 GPU-hours.
-- 25 GiB working disk.
+- 25 GPU-hours.
+- 26 GiB working disk.
 - 2 GiB retained artifact storage.
 
 These values are hard authorization limits rather than predictions or unlimited resources.

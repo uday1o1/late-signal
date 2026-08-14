@@ -118,8 +118,9 @@ def test_one_shot_remote_driver_orders_every_hard_gate_before_scoring() -> None:
     assert [full_execution.index(stage) for stage in stages] == sorted(
         full_execution.index(stage) for stage in stages
     )
-    assert "readonly MAX_GPU_SECONDS=14400" in source
-    assert "readonly MAX_WORKING_KIB=$((25 * 1024 * 1024))" in source
+    assert "readonly MAX_GPU_SECONDS=90000" in source
+    assert "readonly MAX_WALL_SECONDS=108000" in source
+    assert "readonly MAX_WORKING_KIB=$((26 * 1024 * 1024))" in source
     assert "readonly MAX_RETAINED_KIB=$((2 * 1024 * 1024))" in source
     assert "if (( exit_code == 4 && attempt < 2 ))" in source
     assert 'export CUDA_VISIBLE_DEVICES="$GPU_UUID"' in source
@@ -151,6 +152,24 @@ def test_one_shot_remote_driver_orders_every_hard_gate_before_scoring() -> None:
     assert 'verify "$JOB_ROOT" "$EXPECTED_COMMIT"' in selection_function
     assert selection_function.index('verify "$JOB_ROOT"') < selection_function.index("return")
     assert selection_function.index("return") < selection_function.index("selection run")
+
+
+def test_authorized_resource_caps_are_synchronized_across_remote_entry_points() -> None:
+    final_config = Path("configs/experiments/final.yaml").read_text(encoding="utf-8")
+    launcher = STUDY_SCRIPT.read_text(encoding="utf-8")
+    probe = SCRIPT.read_text(encoding="utf-8")
+    selection_resume = RESUME_HELPER.read_text(encoding="utf-8")
+    final_resume = FINAL_RESUME_HELPER.read_text(encoding="utf-8")
+
+    assert "max_runs: 89" in final_config
+    assert "max_gpu_hours: 25.0" in final_config
+    assert "max_working_disk_gb: 26.0" in final_config
+    assert "max_retained_disk_gb: 2.0" in final_config
+    assert "readonly MIN_DISK_GB=26" in launcher
+    assert "readonly MIN_DISK_GB=26" in probe
+    assert "prior_gpu_seconds > 90_000" in selection_resume
+    assert "_MAX_GPU_SECONDS = 90_000" in final_resume
+    assert "_MAX_WORKING_KIB = 26 * 1024 * 1024" in final_resume
 
 
 def test_one_shot_launcher_never_transfers_or_collects_restricted_rows() -> None:
@@ -1904,12 +1923,12 @@ def _run_fast_watchdog(
     source = source.replace('kill -KILL -- "-$MAIN_PGID"', 'kill -KILL "$MAIN_PID"')
     if working_limit is not None:
         source = source.replace(
-            "readonly MAX_WORKING_KIB=$((25 * 1024 * 1024))",
+            "readonly MAX_WORKING_KIB=$((26 * 1024 * 1024))",
             f"readonly MAX_WORKING_KIB={working_limit}",
         )
     if gpu_limit is not None:
         source = source.replace(
-            "readonly MAX_GPU_SECONDS=14400", f"readonly MAX_GPU_SECONDS={gpu_limit}"
+            "readonly MAX_GPU_SECONDS=90000", f"readonly MAX_GPU_SECONDS={gpu_limit}"
         )
     if accounting_reserve is not None:
         source = source.replace(

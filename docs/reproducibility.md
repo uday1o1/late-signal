@@ -80,8 +80,8 @@ Closing either observation command does not stop the detached job.
 Reusing `submit` after an interrupted or infrastructure-failed session resumes immutable stage evidence for the same commit.
 An active duplicate or already completed commit is refused.
 
-The remote driver holds a GPU-specific lock, rejects foreign compute processes, enforces the authored 25 GiB working cap and 2 GiB retained cap, records a launch-scoped heartbeat every 30 seconds, and applies a separate 12-hour wall-clock safety limit.
-It conservatively charges all detached-job elapsed time, polling overhead, and a bounded resume allowance against the 4 GPU-hour cap so sampling cannot undercount short GPU work.
+The remote driver holds a GPU-specific lock, rejects foreign compute processes, enforces the authored 26 GiB working cap and 2 GiB retained cap, records a launch-scoped heartbeat every 30 seconds, and applies a separate 30-hour wall-clock safety limit.
+It conservatively charges all detached-job elapsed time, polling overhead, and a bounded resume allowance against the 25 GPU-hour cap so sampling cannot undercount short GPU work.
 It retries only a stable exit-code-4 infrastructure failure once.
 Configuration, data, consistency, resource, timeout, and scientific gate failures are not converted into passing results.
 The rebuildable runtime feature and package caches are removed only after the aggregate report passes.

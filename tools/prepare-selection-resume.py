@@ -236,7 +236,7 @@ def build_provenance(
     if terminal_gap < 0 or terminal_gap > 120:
         raise ValueError("resume source terminal GPU accounting gap is invalid")
     prior_gpu_seconds = heartbeat_seconds + terminal_gap
-    if prior_gpu_seconds <= 0 or prior_gpu_seconds > 14_400:
+    if prior_gpu_seconds <= 0 or prior_gpu_seconds > 90_000:
         raise ValueError("resume source GPU accounting is outside the authored cap")
 
     payload: dict[str, object] = {

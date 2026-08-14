@@ -130,7 +130,7 @@ Estimate it with:
 uv run latesignal protocol estimate configs/experiments/final.yaml --json
 ```
 
-The checked-in final configuration records hard authorization limits of 89 runs, 4 GPU-hours, 25 GiB working disk, and 2 GiB retained artifacts.
+The checked-in final configuration records hard authorization limits of 89 runs, 25 GPU-hours, 26 GiB working disk, and 2 GiB retained artifacts.
 The estimator includes production-equivalent durable checkpoint and snapshot costs plus a machine-specific floor measured from completed checkpoint generations.
 Strict validation intentionally blocks if its conservative upper range exceeds the checked-in limits.
 Strict validation can pass only on that CUDA-class machine with the verified prepared data available and every authored cap satisfied; a CPU-only environment remains blocked.

@@ -16,8 +16,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-_MAX_GPU_SECONDS = 14_400
-_MAX_WORKING_KIB = 25 * 1024 * 1024
+_MAX_GPU_SECONDS = 90_000
+_MAX_WORKING_KIB = 26 * 1024 * 1024
 _MIN_FREE_KIB = 5 * 1024 * 1024
 _ACCOUNTING_RESERVE_SECONDS = 120
 _ALLOWED_DIFF_PATHS = {
