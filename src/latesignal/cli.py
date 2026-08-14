@@ -26,6 +26,7 @@ from latesignal.evaluation.runner import compare_run_dirs, evaluate_run_dir
 from latesignal.experiments.estimate import estimate_protocol
 from latesignal.experiments.production_aggregate_runner import run_production_aggregate
 from latesignal.experiments.production_final_runner import run_production_final
+from latesignal.experiments.production_qualification_runner import run_final_qualification
 from latesignal.experiments.production_selection_runner import run_production_selection
 from latesignal.experiments.protocol_lock import create_protocol_lock
 from latesignal.experiments.reproduction import reproduce_synthetic
@@ -306,6 +307,111 @@ def final_aggregate_command(
             "status": manifest["status"],
             "out": str(out / "aggregate"),
             "scheduler_outcome": manifest["scheduler_outcome"],
+            "manifest_sha256": manifest["manifest_sha256"],
+        },
+        json_output,
+    )
+
+
+@final_app.command("qualify")
+def final_qualify_command(
+    config: Annotated[
+        Path,
+        typer.Argument(
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+            help="Authored final experiment configuration.",
+        ),
+    ],
+    protocol_lock: Annotated[
+        Path,
+        typer.Option(
+            "--protocol-lock",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+            help="Verified pre-scoring protocol lock.",
+        ),
+    ],
+    data_manifest: Annotated[
+        Path,
+        typer.Option(
+            "--data-manifest",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+            help="Verified prepared-data manifest.",
+        ),
+    ],
+    feature_config: Annotated[
+        Path,
+        typer.Option(
+            "--feature-config",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+            help="Authored click-time feature policy.",
+        ),
+    ],
+    cache_root: Annotated[
+        Path,
+        typer.Option(
+            "--cache-root",
+            file_okay=False,
+            dir_okay=True,
+            resolve_path=True,
+            help="Ignored content-addressed runtime feature-cache root.",
+        ),
+    ],
+    out: Annotated[
+        Path,
+        typer.Option(
+            "--out",
+            file_okay=True,
+            dir_okay=False,
+            resolve_path=True,
+            help="New immutable quality-gate receipt.",
+        ),
+    ],
+    device_uuid: Annotated[
+        str,
+        typer.Option(
+            "--device-uuid",
+            min=1,
+            help="Stable UUID of the sole CUDA device selected by the launcher.",
+        ),
+    ],
+    json_output: JsonOption = False,
+) -> None:
+    """Require all tests and an actual CUDA checkpoint-resume rehearsal to pass."""
+
+    try:
+        manifest = run_final_qualification(
+            config,
+            protocol_lock_path=protocol_lock,
+            data_manifest_path=data_manifest,
+            feature_config_path=feature_config,
+            cache_root=cache_root,
+            output_path=out,
+            device_uuid=device_uuid,
+            repository=Path.cwd(),
+        )
+    except LateSignalError as error:
+        _fail(error, json_output)
+    _emit(
+        {
+            "ok": True,
+            "status": manifest["status"],
+            "out": str(out),
             "manifest_sha256": manifest["manifest_sha256"],
         },
         json_output,

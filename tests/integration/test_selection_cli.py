@@ -121,6 +121,58 @@ def test_public_final_command_routes_the_locked_production_inputs(
     assert captured["device_uuid"] == "GPU-test"
 
 
+def test_public_final_qualify_routes_the_locked_gate_inputs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = tmp_path / "final.yaml"
+    protocol_lock = tmp_path / "protocol-lock.json"
+    data_manifest = tmp_path / "prepared.json"
+    feature_config = tmp_path / "features.yaml"
+    for path in (config, protocol_lock, data_manifest, feature_config):
+        path.write_text("{}\n", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    def fake_qualify(config_path: Path, **kwargs: object) -> dict[str, object]:
+        captured["config_path"] = config_path
+        captured.update(kwargs)
+        return {
+            "status": "passed",
+            "manifest_sha256": "a" * 64,
+        }
+
+    monkeypatch.setattr("latesignal.cli.run_final_qualification", fake_qualify)
+    output = tmp_path / "quality-gate.json"
+    result = runner.invoke(
+        app,
+        [
+            "final",
+            "qualify",
+            str(config),
+            "--protocol-lock",
+            str(protocol_lock),
+            "--data-manifest",
+            str(data_manifest),
+            "--feature-config",
+            str(feature_config),
+            "--cache-root",
+            str(tmp_path / "cache"),
+            "--out",
+            str(output),
+            "--device-uuid",
+            "GPU-test",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "passed"
+    assert captured["protocol_lock_path"] == protocol_lock.resolve()
+    assert captured["output_path"] == output.resolve()
+    assert captured["device_uuid"] == "GPU-test"
+
+
 def test_public_final_aggregate_routes_quality_and_evidence_inputs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
