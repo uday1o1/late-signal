@@ -67,6 +67,32 @@ Exit code `0` means every feasibility requirement passed.
 Exit code `1` means the experimental gate was not met and the JSON `blockers` list identifies the prerequisites.
 Configuration errors use exit code `2`.
 
+## Selection evidence and protocol lock
+
+Selection evidence must enumerate all 36 model candidates, all 8 delayed-method candidates, and all 6 sampler candidates.
+Each candidate records its canonical configuration hash, status, selection-period log loss, measured compute, parameter count, and failure reason when applicable.
+The selection contract rejects any result that accessed an embargo outcome or a final-period metric.
+It also rejects a missing, duplicated, or silently narrowed candidate grid.
+
+The lock command requires passing feasibility evidence and a prepared-data manifest:
+
+```bash
+uv run latesignal protocol lock configs/experiments/final.yaml \
+  --selection results/selection.json \
+  --feasibility results/feasibility.json \
+  --data-manifest data/processed/manifests/preparation.json \
+  --out results/protocol-lock.json \
+  --json
+```
+
+Before writing the immutable lock, the command verifies every prepared file against its recorded byte count and SHA-256 digest.
+The lock captures the final configuration, selection evidence, feasibility result, prepared data, Git commit, dependency lock, installed environment, selected steps per credit, and final seeds.
+Its own canonical SHA-256 digest detects later modification.
+
+A dirty Git tree is refused by default.
+`--allow-dirty` is an explicit non-publication override that records the dirty paths and makes the lock ineligible for publication.
+The override exists for bounded development qualification and must not be used for the final public result.
+
 ## Uncertainty and scheduler claim
 
 Final comparisons require the same persisted click IDs, truth labels, click days, and three training seeds for both methods.

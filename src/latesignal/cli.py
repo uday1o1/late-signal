@@ -12,15 +12,18 @@ import yaml
 
 from latesignal.contracts.config import load_synthetic_config
 from latesignal.contracts.protocol import load_final_protocol
+from latesignal.contracts.selection import load_selection_results
 from latesignal.contracts.study_a import load_study_a_config
 from latesignal.contracts.study_b import load_study_b_config
 from latesignal.data.config import load_data_config
 from latesignal.data.download import FetchNotice, fetch_dataset
 from latesignal.data.inspect import inspect_locked_archive
+from latesignal.data.manifests import read_json, write_json_atomic
 from latesignal.data.prepare import prepare_data
 from latesignal.errors import ExitCode, LateSignalError
 from latesignal.evaluation.runner import compare_run_dirs, evaluate_run_dir
 from latesignal.experiments.estimate import estimate_protocol
+from latesignal.experiments.protocol_lock import create_protocol_lock
 from latesignal.experiments.runner import resume_synthetic_experiment, run_synthetic_experiment
 from latesignal.experiments.study_a import run_study_a
 from latesignal.experiments.study_b import run_study_b
@@ -89,12 +92,24 @@ def protocol_estimate(
             help="Authored final experiment configuration.",
         ),
     ],
+    out: Annotated[
+        Path | None,
+        typer.Option(
+            "--out",
+            file_okay=True,
+            dir_okay=False,
+            resolve_path=True,
+            help="Optional immutable feasibility-result destination.",
+        ),
+    ] = None,
     json_output: JsonOption = False,
 ) -> None:
     """Benchmark the local stack and project the exact authored matrix."""
 
     try:
         result = _protocol_result(config)
+        if out is not None:
+            write_json_atomic(out, result)
     except LateSignalError as error:
         _fail(error, json_output)
     _emit({"ok": result["status"] == "passed", **result}, json_output)
@@ -119,7 +134,107 @@ def protocol_validate(
 ) -> None:
     """Require the matrix, pilot, accelerator, and authored caps to pass."""
 
-    protocol_estimate(config, json_output)
+    protocol_estimate(config, None, json_output)
+
+
+@protocol_app.command("lock")
+def protocol_lock_command(
+    config: Annotated[
+        Path,
+        typer.Argument(
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+            help="Authored final experiment configuration.",
+        ),
+    ],
+    selection: Annotated[
+        Path,
+        typer.Option(
+            "--selection",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+            help="Exhaustive selection-period result document.",
+        ),
+    ],
+    feasibility: Annotated[
+        Path,
+        typer.Option(
+            "--feasibility",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+            help="Passing result from protocol estimate.",
+        ),
+    ],
+    data_manifest: Annotated[
+        Path,
+        typer.Option(
+            "--data-manifest",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+            help="Prepared-data manifest whose files will be verified.",
+        ),
+    ],
+    out: Annotated[
+        Path,
+        typer.Option(
+            "--out",
+            file_okay=True,
+            dir_okay=False,
+            resolve_path=True,
+            help="New immutable protocol-lock destination.",
+        ),
+    ],
+    allow_dirty: Annotated[
+        bool,
+        typer.Option(
+            "--allow-dirty",
+            help="Permit a non-publication lock that records the dirty Git override.",
+        ),
+    ] = False,
+    json_output: JsonOption = False,
+) -> None:
+    """Freeze selections and all pre-scoring identities into a hashed lock."""
+
+    try:
+        final, protocol, protocol_sha256 = load_final_protocol(config)
+        selection_results = load_selection_results(selection)
+        lock = create_protocol_lock(
+            final,
+            protocol,
+            selection_results,
+            read_json(feasibility),
+            protocol_sha256=protocol_sha256,
+            final_config_path=config,
+            selection_path=selection,
+            data_manifest_path=data_manifest,
+            output_path=out,
+            repository=Path.cwd(),
+            allow_dirty=allow_dirty,
+        )
+    except LateSignalError as error:
+        _fail(error, json_output)
+    _emit(
+        {
+            "ok": True,
+            "status": "locked",
+            "out": str(out),
+            "lock_sha256": lock["lock_sha256"],
+            "publication_eligible": lock["publication_eligible"],
+        },
+        json_output,
+    )
 
 
 @app.command("evaluate")

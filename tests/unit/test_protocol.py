@@ -7,7 +7,7 @@ import yaml
 
 from latesignal.contracts.protocol import load_final_protocol
 from latesignal.errors import ConfigurationError
-from latesignal.experiments.estimate import _matrix, estimate_protocol
+from latesignal.experiments.estimate import enumerate_matrix, estimate_protocol
 
 
 def _write_configs(tmp_path: Path, *, narrowed: bool = False) -> Path:
@@ -36,7 +36,7 @@ def test_locked_protocol_enumerates_the_exact_authored_matrix(tmp_path: Path) ->
     path = _write_configs(tmp_path)
     final, protocol, _ = load_final_protocol(path)
 
-    matrix = _matrix(protocol, final)
+    matrix = enumerate_matrix(protocol, final)
 
     assert matrix == {
         "model_selection_runs": 36,

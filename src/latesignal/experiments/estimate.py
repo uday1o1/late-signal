@@ -156,7 +156,7 @@ def _real_pilot(final: FinalExperimentConfig, config_path: Path) -> dict[str, An
     }
 
 
-def _matrix(protocol: ProtocolDefinition, final: FinalExperimentConfig) -> dict[str, int]:
+def enumerate_matrix(protocol: ProtocolDefinition, final: FinalExperimentConfig) -> dict[str, int]:
     model_runs = (
         len(protocol.model_selection.learning_rates)
         * len(protocol.model_selection.weight_decays)
@@ -207,7 +207,7 @@ def estimate_protocol(
 ) -> dict[str, Any]:
     benchmark = _benchmark(final)
     real_pilot = _real_pilot(final, config_path)
-    matrix = _matrix(protocol, final)
+    matrix = enumerate_matrix(protocol, final)
     working_disk = (
         final.pilot.assumed_source_archive_gb
         + final.pilot.assumed_expanded_source_gb
