@@ -102,9 +102,9 @@ def test_locked_protocol_enumerates_the_exact_authored_matrix(tmp_path: Path) ->
         "es_core_credits": 421,
         "dfm_core_credits": 177,
         "auxiliary_steps": 109_200,
-        "one_model_checkpoint_writes": 1_578,
-        "three_model_checkpoint_writes": 471,
-        "equivalent_single_model_checkpoint_writes": 2_991,
+        "one_model_checkpoint_writes": 1_560,
+        "three_model_checkpoint_writes": 1_020,
+        "equivalent_single_model_checkpoint_writes": 4_620,
     }
 
 
@@ -166,7 +166,7 @@ def test_estimator_models_rolling_checkpoint_storage(
     assert result["assumptions"]["execution_host_has_source_artifacts"] is False
 
 
-def test_estimator_rejects_k500_after_including_real_workload_classes(
+def test_estimator_selects_k100_after_counting_daily_scheduler_checkpoints(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     path = _write_configs(tmp_path)
@@ -213,9 +213,10 @@ def test_estimator_rejects_k500_after_including_real_workload_classes(
     )
 
     assert result["status"] == "passed"
-    assert result["selected_steps_per_credit"] == 250
+    assert result["selected_steps_per_credit"] == 100
     assert result["projections"][2]["cap_checks"]["compute_hours"] is False
-    assert result["projections"][1]["fits_caps"] is True
+    assert result["projections"][1]["fits_caps"] is False
+    assert result["projections"][0]["fits_caps"] is True
     assert result["worst_case_workload"]["auxiliary_steps"] == 109_200
 
 

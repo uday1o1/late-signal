@@ -377,13 +377,14 @@ def _worst_case_workload(
         + (matrix["delayed_selection_runs"] - es_delayed_runs)
         * (protocol.delayed_selection.credits_per_run + 2)
         + (matrix["final_study_a_runs"] - es_final_a_runs)
-        * (protocol.final_training.study_a_credits + 2)
+        * (protocol.final_training.study_a_credits + 1)
     )
+    final_daily_checkpoint_writes = protocol.final_training.study_a_credits + 1
     three_model_checkpoint_writes = (
         es_delayed_runs * (protocol.delayed_selection.credits_per_run + 2)
         + es_sampler_runs * (protocol.sampler_selection.credits_per_run + 2)
-        + es_final_a_runs * (protocol.final_training.study_a_credits + 2)
-        + es_final_b_runs * (protocol.final_training.study_b_credits + 2)
+        + es_final_a_runs * final_daily_checkpoint_writes
+        + es_final_b_runs * final_daily_checkpoint_writes
     )
     return {
         "selection_runs": selection_runs,
