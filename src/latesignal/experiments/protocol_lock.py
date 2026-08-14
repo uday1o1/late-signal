@@ -40,7 +40,7 @@ DIRECT_PACKAGES = (
 )
 
 
-def _select[Candidate: CandidateResult](candidates: list[Candidate]) -> Candidate:
+def select_candidate[Candidate: CandidateResult](candidates: list[Candidate]) -> Candidate:
     blockers = [
         item for item in candidates if item.status in {"infrastructure_failed", "incomplete"}
     ]
@@ -80,9 +80,9 @@ def _select[Candidate: CandidateResult](candidates: list[Candidate]) -> Candidat
 
 
 def selection_decisions(results: SelectionResults) -> dict[str, object]:
-    model = _select(results.model_candidates)
-    delayed = _select(results.delayed_candidates)
-    sampler = _select(results.sampler_candidates)
+    model = select_candidate(results.model_candidates)
+    delayed = select_candidate(results.delayed_candidates)
+    sampler = select_candidate(results.sampler_candidates)
     return {
         "model": model.model_dump(mode="json"),
         "delayed": delayed.model_dump(mode="json"),
