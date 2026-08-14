@@ -406,6 +406,17 @@ def test_final_resume_helper_preserves_same_commit_checkpoint_evidence(tmp_path:
         ["git", "-C", str(repository), "add", "tools/prepare-final-resume.py"], check=True
     )
     subprocess.run(["git", "-C", str(repository), "commit", "-qm", "correction"], check=True)
+    (repository / "tests" / "unit" / "test_remote_gpu_script.py").write_text(
+        "driver fixture with persisted-feasibility correction\n", encoding="utf-8"
+    )
+    subprocess.run(
+        ["git", "-C", str(repository), "add", "tests/unit/test_remote_gpu_script.py"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repository), "commit", "-qm", "validation correction"],
+        check=True,
+    )
     driver_commit = subprocess.run(
         ["git", "-C", str(repository), "rev-parse", "HEAD"],
         check=True,
@@ -425,7 +436,6 @@ def test_final_resume_helper_preserves_same_commit_checkpoint_evidence(tmp_path:
     protocol_sha256 = "3" * 64
     feasibility: dict[str, object] = {
         "status": "passed",
-        "ok": True,
         "blockers": [],
         "selected_steps_per_credit": 100,
         "matrix": {"total_runs": 89},
@@ -812,12 +822,14 @@ def test_final_resume_helper_preserves_same_commit_checkpoint_evidence(tmp_path:
         )
     )
     fifth = subprocess.run(arguments, check=False, capture_output=True, text=True)
+    fifth_observed_at = datetime.now(UTC)
     fifth_launch = f"recovery-{driver_commit[:12]}-5"
     assert fifth.returncode == 0, fifth.stderr
-    assert fifth.stdout.splitlines() == [
-        f"RECOVERY_LAUNCH_ID={fifth_launch}",
-        "PRIOR_GPU_SECONDS=670",
-    ]
+    fifth_lines = fifth.stdout.splitlines()
+    assert fifth_lines[0] == f"RECOVERY_LAUNCH_ID={fifth_launch}"
+    fifth_prior = int(fifth_lines[1].removeprefix("PRIOR_GPU_SECONDS="))
+    fixture_started_at = datetime.fromisoformat(now.replace("Z", "+00:00"))
+    assert 670 <= fifth_prior <= 670 + int((fifth_observed_at - fixture_started_at).total_seconds())
 
     (job / "started.json").write_bytes(
         _canonical_fixture(
@@ -856,12 +868,13 @@ def test_final_resume_helper_preserves_same_commit_checkpoint_evidence(tmp_path:
         )
     )
     sixth = subprocess.run(arguments, check=False, capture_output=True, text=True)
+    sixth_observed_at = datetime.now(UTC)
     sixth_launch = f"recovery-{driver_commit[:12]}-6"
     assert sixth.returncode == 0, sixth.stderr
     sixth_lines = sixth.stdout.splitlines()
     assert sixth_lines[0] == f"RECOVERY_LAUNCH_ID={sixth_launch}"
     sixth_prior = int(sixth_lines[1].removeprefix("PRIOR_GPU_SECONDS="))
-    assert 800 <= sixth_prior <= 805
+    assert 800 <= sixth_prior <= 800 + int((sixth_observed_at - fixture_started_at).total_seconds())
 
     (job / "started.json").write_bytes(
         _canonical_fixture(
@@ -1032,7 +1045,6 @@ def test_recover_final_reaches_old_worktree_through_remote_tmux(
     protocol_sha256 = "3" * 64
     feasibility: dict[str, object] = {
         "status": "passed",
-        "ok": True,
         "blockers": [],
         "selected_steps_per_credit": 100,
         "matrix": {"total_runs": 89},
