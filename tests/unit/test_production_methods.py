@@ -120,6 +120,7 @@ def test_esdfm_emits_only_legally_mature_auxiliary_targets() -> None:
 
 
 def test_production_method_resume_and_truth_order_fail_closed() -> None:
+    day = SECONDS_PER_DAY
     click_times = np.asarray([0.0, 1.0], dtype=np.float64)
     store = PackedRecordStore(feature_count=2)
     method = PackedDelayedMethod(
@@ -133,6 +134,7 @@ def test_production_method_resume_and_truth_order_fail_closed() -> None:
         click_refs=np.arange(2, dtype=np.int32),
         truth=_truth([0], [1.0], [1]),
     )
+    assert len(store) == 0
     state = method.state_dict()
     restored_store = PackedRecordStore(feature_count=2)
     restored_store.load_state_dict(store.state_dict())
@@ -144,11 +146,15 @@ def test_production_method_resume_and_truth_order_fail_closed() -> None:
     )
     restored.load_state_dict(state)
     restored.process_boundary(
-        boundary=2.0,
+        boundary=30 * day + 2.0,
         click_refs=np.asarray([], dtype=np.int32),
-        truth=_truth([1], [2.0], [0]),
+        truth=_truth([1], [30 * day + 1.0], [0]),
     )
     assert restored_store.targets[: len(restored_store)].tolist() == [1.0, 0.0]
+    assert restored_store.available_at[: len(restored_store)].tolist() == [
+        30 * day,
+        30 * day + 1.0,
+    ]
 
     with pytest.raises(ConsistencyError, match="before click"):
         PackedDelayedMethod(
@@ -172,4 +178,33 @@ def test_production_method_resume_and_truth_order_fail_closed() -> None:
             boundary=0.0,
             click_refs=np.asarray([0], dtype=np.int32),
             truth=_truth([0], [1.0], [1]),
+        )
+
+
+def test_production_method_rejects_truth_shifted_before_legal_availability() -> None:
+    day = SECONDS_PER_DAY
+    click_times = np.asarray([day], dtype=np.float64)
+
+    with pytest.raises(ConsistencyError, match="legal availability"):
+        PackedDelayedMethod(
+            "complete_wait",
+            click_times=click_times,
+            monitoring_mask=np.zeros(1, dtype=np.bool_),
+            main_store=PackedRecordStore(feature_count=1),
+        ).process_boundary(
+            boundary=day,
+            click_refs=np.asarray([0], dtype=np.int32),
+            truth=_truth([0], [day - 1.0], [1]),
+        )
+
+    with pytest.raises(ConsistencyError, match="legal availability"):
+        PackedDelayedMethod(
+            "complete_wait",
+            click_times=click_times,
+            monitoring_mask=np.zeros(1, dtype=np.bool_),
+            main_store=PackedRecordStore(feature_count=1),
+        ).process_boundary(
+            boundary=31 * day,
+            click_refs=np.asarray([0], dtype=np.int32),
+            truth=_truth([0], [30 * day], [0]),
         )

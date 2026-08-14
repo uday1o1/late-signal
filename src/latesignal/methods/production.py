@@ -127,8 +127,8 @@ class PackedDelayedMethod:
         elif q_tn_store is not None or q_dp_store is not None:
             raise ValueError("Only ES-DFM accepts auxiliary record stores")
         self.name = name
-        self.click_times = np.asarray(click_times, dtype=np.float64)
-        self.monitoring_mask = np.asarray(monitoring_mask, dtype=np.bool_)
+        self.click_times = np.array(click_times, dtype=np.float64, copy=True)
+        self.monitoring_mask = np.array(monitoring_mask, dtype=np.bool_, copy=True)
         self.main_store = main_store
         self.q_tn_store = q_tn_store
         self.q_dp_store = q_dp_store
@@ -143,6 +143,7 @@ class PackedDelayedMethod:
         self.monitoring_sha256 = hashlib.sha256(
             np.packbits(self.monitoring_mask, bitorder="little").tobytes()
         ).hexdigest()
+        self.click_times_sha256 = hashlib.sha256(self.click_times.tobytes()).hexdigest()
         self.config_sha256 = hashlib.sha256(
             canonical_json_bytes(
                 {
@@ -150,6 +151,7 @@ class PackedDelayedMethod:
                     "wait_seconds": self.wait_seconds,
                     "attribution_seconds": self.attribution_seconds,
                     "monitoring_sha256": self.monitoring_sha256,
+                    "click_times_sha256": self.click_times_sha256,
                 }
             )
         ).hexdigest()
@@ -209,8 +211,20 @@ class PackedDelayedMethod:
             raise ConsistencyError("Production truth arrived before click or more than once")
         positives = truth.labels == 1
         negatives = truth.labels == 0
-        if not np.all(positives | negatives):
-            raise ConsistencyError("Production truth label is not binary")
+        maturity_times = self.click_times[refs] + self.attribution_seconds
+        if (
+            not np.all(positives | negatives)
+            or np.any(np.diff(truth.available_at) < 0.0)
+            or np.any(truth.available_at < self.click_times[refs])
+            or np.any(truth.available_at[positives] > maturity_times[positives])
+            or not np.allclose(
+                truth.available_at[negatives],
+                maturity_times[negatives],
+                rtol=0.0,
+                atol=1e-6,
+            )
+        ):
+            raise ConsistencyError("Production truth violates legal availability")
         positive_refs = refs[positives]
         negative_refs = refs[negatives]
         self.outcome_state[positive_refs] = _POSITIVE
@@ -220,14 +234,7 @@ class PackedDelayedMethod:
         ).astype(np.float32)
         legal = self._legal(refs)
         legal_positive = positives & legal
-        if self.name == "complete_wait":
-            pending.add(
-                refs[legal],
-                truth.available_at[legal],
-                truth.labels[legal].astype(np.float32),
-                RecordKind.FINAL,
-            )
-        elif self.name in {"immediate_fake_negative", "fnw"}:
+        if self.name in {"immediate_fake_negative", "fnw"}:
             pending.add(
                 refs[legal_positive],
                 truth.available_at[legal_positive],
@@ -272,10 +279,13 @@ class PackedDelayedMethod:
             )
         self.due_cursor = end
 
-    def _emit_auxiliary(self, boundary: float) -> tuple[int, int]:
-        if self.name != "es_dfm":
+    def _emit_mature(
+        self,
+        boundary: float,
+        pending: _PendingRecords,
+    ) -> tuple[int, int]:
+        if self.name not in {"complete_wait", "es_dfm"}:
             return 0, 0
-        assert self.q_tn_store is not None and self.q_dp_store is not None
         maturity_times = self.click_times[: self.click_cursor] + self.attribution_seconds
         end = int(np.searchsorted(maturity_times, boundary, side="right"))
         refs = np.arange(self.maturity_cursor, end, dtype=np.int32)
@@ -283,9 +293,19 @@ class PackedDelayedMethod:
             self.maturity_cursor = end
             return 0, 0
         if np.any(self.outcome_state[refs] == _UNRESOLVED):
-            raise ConsistencyError("ES-DFM maturity arrived before legal final truth")
+            raise ConsistencyError("Method maturity arrived before legal final truth")
         legal_refs = refs[self._legal(refs)]
         times = self.click_times[legal_refs] + self.attribution_seconds
+        if self.name == "complete_wait":
+            pending.add(
+                legal_refs,
+                times,
+                (self.outcome_state[legal_refs] == _POSITIVE).astype(np.float32),
+                RecordKind.FINAL,
+            )
+            self.maturity_cursor = end
+            return 0, 0
+        assert self.q_tn_store is not None and self.q_dp_store is not None
         assert self.wait_seconds is not None
         delayed = (self.outcome_state[legal_refs] == _POSITIVE) & (
             self.positive_delay_days[legal_refs] * SECONDS_PER_DAY > self.wait_seconds
@@ -324,10 +344,10 @@ class PackedDelayedMethod:
         self._register_clicks(click_refs, boundary, pending)
         self._register_truth(truth, boundary, pending)
         self._emit_due(boundary, pending)
+        q_tn_records, q_dp_records = self._emit_mature(boundary, pending)
         batch = pending.batch()
         if batch is not None:
             self.main_store.append(batch, simulator_time=boundary)
-        q_tn_records, q_dp_records = self._emit_auxiliary(boundary)
         self.last_time = boundary
         return MethodBoundaryResult(
             main_records=0 if batch is None else len(batch),
@@ -437,7 +457,7 @@ class PackedDelayedMethod:
                         side="right",
                     )
                 )
-                if self.name == "es_dfm"
+                if self.name in {"complete_wait", "es_dfm"}
                 else 0
             )
             if due_cursor != expected_due or maturity_cursor != expected_maturity:
