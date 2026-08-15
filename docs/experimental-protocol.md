@@ -87,7 +87,21 @@ The final gate also fails when the requested accelerator is unavailable, the req
 Run strict validation after supplying caps and making the prepared data and accelerator available:
 
 ```bash
-uv run latesignal protocol validate configs/experiments/final.yaml --json
+GPU_UUID="$(nvidia-smi --query-gpu=uuid --format=csv,noheader | sed '/^[[:space:]]*$/d')"
+test "$(printf '%s\n' "$GPU_UUID" | wc -l | tr -d ' ')" = "1"
+test "${GPU_UUID#GPU-}" != "$GPU_UUID"
+export GPU_UUID
+export CUDA_VISIBLE_DEVICES="$GPU_UUID"
+
+uv run latesignal protocol validate configs/experiments/final.yaml \
+  --out runs/feasibility/measured.json \
+  --json
+uv run latesignal protocol bind-feasibility configs/experiments/final.yaml \
+  --measured runs/feasibility/measured.json \
+  --data-manifest data/processed/manifests/preparation.json \
+  --device-uuid "$GPU_UUID" \
+  --out runs/feasibility/final.json \
+  --json
 ```
 
 Exit code `0` means every feasibility requirement passed.
@@ -113,6 +127,7 @@ uv run latesignal protocol lock configs/experiments/final.yaml \
 ```
 
 Before writing the immutable lock, the command verifies every prepared file against its recorded byte count and SHA-256 digest.
+For a CUDA protocol, it also rejects missing, tampered, or context-mismatched feasibility binding.
 The lock captures the final configuration, selection evidence, feasibility result, prepared data, Git commit, dependency lock, installed environment, selected steps per credit, and final seeds.
 Its own canonical SHA-256 digest detects later modification.
 

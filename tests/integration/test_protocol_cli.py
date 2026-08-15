@@ -7,6 +7,8 @@ import pytest
 from typer.testing import CliRunner
 
 from latesignal.cli import app
+from latesignal.contracts.protocol import load_final_protocol
+from latesignal.data.manifests import write_json_atomic
 
 runner = CliRunner()
 
@@ -111,3 +113,100 @@ def test_protocol_estimate_refuses_control_artifacts_in_tracked_repository_path(
     assert payload["error"] == "INVALID_CONFIGURATION"
     assert "ignored runs root" in payload["message"]
     assert not output.exists()
+
+
+def test_public_bind_feasibility_routes_exact_execution_identities(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, _, protocol_sha256 = load_final_protocol(Path("configs/experiments/final.yaml"))
+    measured = tmp_path / "measured.json"
+    data_manifest = tmp_path / "preparation.json"
+    output = tmp_path / "bound.json"
+    write_json_atomic(
+        measured,
+        {
+            "feasibility_model_version": 3,
+            "status": "passed",
+            "blockers": [],
+            "protocol_sha256": protocol_sha256,
+            "selected_steps_per_credit": 500,
+        },
+    )
+    write_json_atomic(data_manifest, {"manifest_version": 1})
+    captured: dict[str, object] = {}
+
+    def fake_bind(measured_path: Path, output_path: Path, **kwargs: object) -> dict[str, object]:
+        captured["measured_path"] = measured_path
+        captured["output_path"] = output_path
+        captured.update(kwargs)
+        return {
+            "status": "passed",
+            "selected_steps_per_credit": 500,
+            "execution_context": {"context_sha256": "a" * 64},
+        }
+
+    monkeypatch.setattr("latesignal.cli.bind_feasibility_context", fake_bind)
+    result = runner.invoke(
+        app,
+        [
+            "protocol",
+            "bind-feasibility",
+            "configs/experiments/final.yaml",
+            "--measured",
+            str(measured),
+            "--data-manifest",
+            str(data_manifest),
+            "--device-uuid",
+            "GPU-exact",
+            "--out",
+            str(output),
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "passed"
+    assert payload["context_sha256"] == "a" * 64
+    assert captured["measured_path"] == measured.resolve()
+    assert captured["output_path"] == output.resolve()
+    assert captured["data_manifest_path"] == data_manifest.resolve()
+    assert captured["device_uuid"] == "GPU-exact"
+
+
+def test_public_bind_feasibility_rejects_blocked_measurement(tmp_path: Path) -> None:
+    _, _, protocol_sha256 = load_final_protocol(Path("configs/experiments/final.yaml"))
+    measured = tmp_path / "measured.json"
+    data_manifest = tmp_path / "preparation.json"
+    write_json_atomic(
+        measured,
+        {
+            "feasibility_model_version": 3,
+            "status": "blocked",
+            "blockers": ["REQUESTED_ACCELERATOR_UNAVAILABLE"],
+            "protocol_sha256": protocol_sha256,
+        },
+    )
+    write_json_atomic(data_manifest, {"manifest_version": 1})
+
+    result = runner.invoke(
+        app,
+        [
+            "protocol",
+            "bind-feasibility",
+            "configs/experiments/final.yaml",
+            "--measured",
+            str(measured),
+            "--data-manifest",
+            str(data_manifest),
+            "--device-uuid",
+            "GPU-exact",
+            "--out",
+            str(tmp_path / "bound.json"),
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 5, result.stdout
+    assert "Only passing matched CUDA feasibility" in json.loads(result.stdout)["message"]

@@ -24,14 +24,18 @@ def _digest(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
 
-def _authored_configs(tmp_path: Path) -> tuple[Path, str, dict[str, int]]:
+def _authored_configs(
+    tmp_path: Path,
+    *,
+    target_device: str = "cpu",
+) -> tuple[Path, str, dict[str, int]]:
     protocol = yaml.safe_load(Path("configs/protocol.yaml").read_text(encoding="utf-8"))
     final = yaml.safe_load(Path("configs/experiments/final.yaml").read_text(encoding="utf-8"))
     protocol_path = tmp_path / "protocol.yaml"
     final_path = tmp_path / "final.yaml"
     protocol_path.write_text(yaml.safe_dump(protocol, sort_keys=False), encoding="utf-8")
     final["protocol"] = "protocol.yaml"
-    final["target_device"] = "cpu"
+    final["target_device"] = target_device
     final["require_real_pilot"] = True
     final["pilot"]["prepared_root"] = "processed"
     final["caps"] = {
@@ -241,6 +245,39 @@ def test_public_protocol_lock_hashes_selection_data_code_and_environment(tmp_pat
     write_json_atomic(output, stored, overwrite=True)
     with pytest.raises(ConsistencyError, match="does not match"):
         verify_protocol_lock(output)
+
+
+def test_cuda_protocol_lock_rejects_unbound_feasibility(tmp_path: Path) -> None:
+    final_path, protocol_sha256, matrix = _authored_configs(tmp_path, target_device="cuda")
+    selection_path = tmp_path / "selection.json"
+    feasibility_path = tmp_path / "feasibility.json"
+    data_manifest = _prepared_manifest(tmp_path)
+    output = tmp_path / "protocol-lock.json"
+    write_json_atomic(selection_path, _selection(protocol_sha256))
+    write_json_atomic(feasibility_path, _feasibility(protocol_sha256, matrix))
+
+    result = runner.invoke(
+        app,
+        [
+            "protocol",
+            "lock",
+            str(final_path),
+            "--selection",
+            str(selection_path),
+            "--feasibility",
+            str(feasibility_path),
+            "--data-manifest",
+            str(data_manifest),
+            "--out",
+            str(output),
+            "--allow-dirty",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 5, result.stdout
+    assert "exact bound execution context" in json.loads(result.stdout)["message"]
+    assert not output.exists()
 
 
 def test_selection_lock_refuses_infrastructure_failure(tmp_path: Path) -> None:

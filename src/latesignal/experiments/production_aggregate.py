@@ -720,13 +720,27 @@ def _aggregate_report(
             "limitations": limitations,
             "reproduction_commands": [
                 "uv sync --frozen --all-groups",
+                'GPU_UUID="$(nvidia-smi --query-gpu=uuid --format=csv,noheader '
+                "| sed '/^[[:space:]]*$/d')\"",
+                'test "$(printf \'%s\\n\' "$GPU_UUID" | wc -l | tr -d \' \')" = "1"',
+                'test "${GPU_UUID#GPU-}" != "$GPU_UUID"',
+                "export GPU_UUID",
+                'export CUDA_VISIBLE_DEVICES="$GPU_UUID"',
                 "uv run latesignal protocol validate configs/experiments/final.yaml "
-                "--out runs/feasibility/final.json --json",
+                "--out runs/feasibility/measured.json --json",
+                "uv run latesignal protocol bind-feasibility "
+                "configs/experiments/final.yaml "
+                "--measured runs/feasibility/measured.json "
+                "--data-manifest data/processed/manifests/preparation.json "
+                '--device-uuid "$GPU_UUID" --out runs/feasibility/final.json --json',
+                "SELECTED_STEPS=\"$(uv run --frozen python -c 'import json; "
+                'print(json.load(open("runs/feasibility/final.json"))'
+                '["selected_steps_per_credit"])\')"',
                 "uv run latesignal selection run configs/experiments/final.yaml "
                 "--data-manifest data/processed/manifests/preparation.json "
                 "--feature-config configs/features.yaml --cache-root data/runtime-features "
-                "--out runs/selection --steps-per-credit SELECTED_STEPS "
-                "--device-uuid GPU_UUID --json",
+                '--out runs/selection --steps-per-credit "$SELECTED_STEPS" '
+                '--device-uuid "$GPU_UUID" --json',
                 "uv run latesignal protocol lock configs/experiments/final.yaml "
                 "--selection runs/selection/selection-results.json "
                 "--feasibility runs/feasibility/final.json "
@@ -736,18 +750,18 @@ def _aggregate_report(
                 "--protocol-lock runs/protocol-lock.json "
                 "--data-manifest data/processed/manifests/preparation.json "
                 "--feature-config configs/features.yaml --cache-root data/runtime-features "
-                "--out runs/quality-gate.json --device-uuid GPU_UUID --json",
+                '--out runs/quality-gate.json --device-uuid "$GPU_UUID" --json',
                 "uv run latesignal final run configs/experiments/final.yaml "
                 "--protocol-lock runs/protocol-lock.json "
                 "--data-manifest data/processed/manifests/preparation.json "
                 "--feature-config configs/features.yaml --cache-root data/runtime-features "
-                "--out runs/final --device-uuid GPU_UUID --json",
+                '--out runs/final --device-uuid "$GPU_UUID" --json',
                 "uv run latesignal final aggregate configs/experiments/final.yaml "
                 "--protocol-lock runs/protocol-lock.json "
                 "--data-manifest data/processed/manifests/preparation.json "
                 "--feature-config configs/features.yaml --cache-root data/runtime-features "
                 "--out runs/final --quality-gate runs/quality-gate.json "
-                "--device-uuid GPU_UUID --json",
+                '--device-uuid "$GPU_UUID" --json',
             ],
             "claim": {
                 "scheduler_outcome": outcome["outcome"],

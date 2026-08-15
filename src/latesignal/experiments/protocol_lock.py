@@ -24,6 +24,7 @@ from latesignal.data.manifests import (
 from latesignal.data.prepared import verify_prepared_inventory
 from latesignal.errors import ConfigurationError, ConsistencyError
 from latesignal.experiments.estimate import enumerate_matrix
+from latesignal.experiments.feasibility_context import verify_feasibility_context_payload
 
 DIRECT_PACKAGES = (
     "blake3",
@@ -290,6 +291,22 @@ def create_protocol_lock(
             eligible.append(steps)
     if not eligible or feasibility["selected_steps_per_credit"] != max(eligible):
         raise ConsistencyError("Feasibility did not choose the largest candidate fitting all caps")
+    execution_context = feasibility.get("execution_context")
+    target_gpu_uuid = (
+        execution_context.get("device_uuid") if isinstance(execution_context, dict) else None
+    )
+    if final.target_device == "cuda":
+        if not isinstance(target_gpu_uuid, str):
+            raise ConsistencyError(
+                "CUDA feasibility must have an exact bound execution context before locking"
+            )
+        verify_feasibility_context_payload(
+            feasibility,
+            repository=repository,
+            data_manifest_path=data_manifest_path,
+            final_config_path=final_config_path,
+            device_uuid=target_gpu_uuid,
+        )
     if final.target_device == "cuda" and not torch.cuda.is_available():
         raise ConfigurationError("Protocol lock requires the authored CUDA target to be available")
     git = _git_identity(repository, allow_dirty=allow_dirty)
@@ -299,10 +316,6 @@ def create_protocol_lock(
     selection_file_sha256, _ = sha256_file(selection_path)
     feasibility_sha256 = hashlib.sha256(canonical_json_bytes(feasibility)).hexdigest()
     environment_sha256 = hashlib.sha256(canonical_json_bytes(environment)).hexdigest()
-    execution_context = feasibility.get("execution_context")
-    target_gpu_uuid = (
-        execution_context.get("device_uuid") if isinstance(execution_context, dict) else None
-    )
     payload: dict[str, Any] = {
         "lock_version": 1,
         "created_at": datetime.now(UTC).isoformat(),

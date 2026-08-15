@@ -26,13 +26,21 @@ def _context(device_uuid: str = "GPU-exact") -> dict[str, object]:
     }
 
 
+def _measured(**values: object) -> dict[str, object]:
+    return {
+        "status": "passed",
+        "benchmark": {"environment": {"device_uuid": "GPU-exact"}},
+        **values,
+    }
+
+
 def test_feasibility_context_is_immutable_and_runtime_bound(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     measured = tmp_path / "measured.json"
     output = tmp_path / "feasibility.json"
-    write_json_atomic(measured, {"status": "passed", "selected_steps_per_credit": 500})
+    write_json_atomic(measured, _measured(selected_steps_per_credit=500))
     monkeypatch.setattr(
         "latesignal.experiments.feasibility_context._current_context",
         lambda *args, **kwargs: _context(),
@@ -65,7 +73,7 @@ def test_feasibility_context_rejects_device_or_content_drift(
 ) -> None:
     measured = tmp_path / "measured.json"
     output = tmp_path / "feasibility.json"
-    write_json_atomic(measured, {"status": "passed"})
+    write_json_atomic(measured, _measured())
     monkeypatch.setattr(
         "latesignal.experiments.feasibility_context._current_context",
         lambda *args, **kwargs: _context(),
@@ -101,12 +109,11 @@ def test_feasibility_context_rejects_top_level_payload_tampering(
     output = tmp_path / "feasibility.json"
     write_json_atomic(
         measured,
-        {
-            "status": "passed",
-            "blockers": [],
-            "selected_steps_per_credit": 500,
-            "projections": [{"steps_per_credit": 500, "fits_caps": True}],
-        },
+        _measured(
+            blockers=[],
+            selected_steps_per_credit=500,
+            projections=[{"steps_per_credit": 500, "fits_caps": True}],
+        ),
     )
     monkeypatch.setattr(
         "latesignal.experiments.feasibility_context._current_context",
@@ -126,6 +133,50 @@ def test_feasibility_context_rejects_top_level_payload_tampering(
     with pytest.raises(ConsistencyError, match="payload failed its content seal"):
         verify_feasibility_context(
             output,
+            repository=tmp_path,
+            data_manifest_path=tmp_path / "data.json",
+            final_config_path=tmp_path / "final.yaml",
+            device_uuid="GPU-exact",
+        )
+
+
+def test_feasibility_binding_requires_the_exact_visibility_export(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    measured = tmp_path / "measured.json"
+    write_json_atomic(measured, _measured())
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    monkeypatch.setattr("torch.cuda.is_available", lambda: True)
+    monkeypatch.setattr("torch.cuda.device_count", lambda: 1)
+
+    with pytest.raises(ConsistencyError, match="exactly one CUDA device"):
+        bind_feasibility_context(
+            measured,
+            tmp_path / "bound.json",
+            repository=tmp_path,
+            data_manifest_path=tmp_path / "data.json",
+            final_config_path=tmp_path / "final.yaml",
+            device_uuid="GPU-exact",
+        )
+
+
+def test_feasibility_binding_rejects_a_different_measured_gpu(
+    tmp_path: Path,
+) -> None:
+    measured = tmp_path / "measured.json"
+    write_json_atomic(
+        measured,
+        {
+            "status": "passed",
+            "benchmark": {"environment": {"device_uuid": "GPU-other"}},
+        },
+    )
+
+    with pytest.raises(ConsistencyError, match="selected exported GPU UUID"):
+        bind_feasibility_context(
+            measured,
+            tmp_path / "bound.json",
             repository=tmp_path,
             data_manifest_path=tmp_path / "data.json",
             final_config_path=tmp_path / "final.yaml",

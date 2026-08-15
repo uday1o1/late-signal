@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -341,9 +342,22 @@ def test_final_aggregate_builds_strict_truthful_report_input() -> None:
     assert {item.scheduler for item in report.schedulers} == set(SCHEDULERS)
     assert len(report.paired_intervals) == 96
     assert report.claim.scheduler_outcome == "supported"
-    assert any("protocol validate" in command for command in report.reproduction_commands)
+    commands = report.reproduction_commands
+    assert any(
+        "protocol validate" in command and "runs/feasibility/measured.json" in command
+        for command in commands
+    )
+    assert any("bind-feasibility" in command for command in report.reproduction_commands)
+    assert 'export CUDA_VISIBLE_DEVICES="$GPU_UUID"' in report.reproduction_commands
     assert any("final qualify" in command for command in report.reproduction_commands)
     assert all("ssh" not in command.lower() for command in report.reproduction_commands)
+    subprocess.run(
+        ["bash", "-n"],
+        input="\n".join(commands),
+        text=True,
+        check=True,
+        capture_output=True,
+    )
     assert outcome["supported"] is True
 
 

@@ -503,6 +503,9 @@ def _benchmark(
             "platform": platform.platform(),
             "cuda": torch.version.cuda,
             "gpu": torch.cuda.get_device_name(device) if device.type == "cuda" else None,
+            "device_uuid": (
+                os.environ.get("CUDA_VISIBLE_DEVICES") if device.type == "cuda" else None
+            ),
         },
     }
 

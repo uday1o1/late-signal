@@ -29,6 +29,12 @@ The checked-in synthetic manifest binds the source tree, dependency lock, config
 On a compatible local CUDA machine, exercise the accelerator path without licensed data:
 
 ```bash
+GPU_UUID="$(nvidia-smi --query-gpu=uuid --format=csv,noheader | sed '/^[[:space:]]*$/d')"
+test "$(printf '%s\n' "$GPU_UUID" | wc -l | tr -d ' ')" = "1"
+test "${GPU_UUID#GPU-}" != "$GPU_UUID"
+export GPU_UUID
+export CUDA_VISIBLE_DEVICES="$GPU_UUID"
+
 uv run latesignal protocol validate configs/experiments/gpu_smoke.yaml \
   --out runs/feasibility/gpu-smoke.json \
   --json
@@ -74,13 +80,30 @@ The checked-in final configuration provides all four resource caps.
 Run the strict bounded estimator with the prepared data and intended CUDA device available:
 
 ```bash
+GPU_UUID="$(nvidia-smi --query-gpu=uuid --format=csv,noheader | sed '/^[[:space:]]*$/d')"
+test "$(printf '%s\n' "$GPU_UUID" | wc -l | tr -d ' ')" = "1"
+test "${GPU_UUID#GPU-}" != "$GPU_UUID"
+export GPU_UUID
+export CUDA_VISIBLE_DEVICES="$GPU_UUID"
+
 uv run latesignal protocol validate configs/experiments/final.yaml \
+  --out runs/feasibility/measured.json \
+  --json
+
+uv run latesignal protocol bind-feasibility configs/experiments/final.yaml \
+  --measured runs/feasibility/measured.json \
+  --data-manifest data/processed/manifests/preparation.json \
+  --device-uuid "$GPU_UUID" \
   --out runs/feasibility/final.json \
   --json
 ```
 
-The command must exit successfully and choose the largest allowed steps-per-credit value that fits every cap.
+The validation command must exit successfully and choose the largest allowed steps-per-credit value that fits every cap.
 It does not use a quality metric for that choice.
+Its measured benchmark records the exported physical GPU UUID alongside the CUDA environment.
+The binding command requires a clean tree and exactly one visible CUDA device matching `GPU_UUID`.
+It content-seals the measured payload and binds it to the exact commit, source tree, dependency lock, final configuration, prepared-data inventory, runtime, driver, and physical GPU identity.
+Protocol locking rejects unbound or context-mismatched CUDA feasibility.
 The projection includes shared initialization, method-specific core training, worst-case ES-DFM auxiliary training, all primary and intermediate prediction passes, production state cloning, durable rolling checkpoint writes and reload verification, immutable snapshot writes, every checkpoint-time and terminal snapshot verification, pending stage ledgers, and aggregate retention.
 The estimator benchmarks checkpoint artifacts in a fixed ignored work root on the result filesystem and removes that root after a normal completion.
 Its ownership marker and exclusive lock make a retry recoverable without permitting deletion of foreign content.
@@ -92,13 +115,14 @@ Selection runs use outcomes only for click days 25 through 34 and record every a
 Run or resume the frozen 36 + 8 + 6 selection graph with the feasibility-selected budget:
 
 ```bash
+SELECTED_STEPS="$(uv run --frozen python -c 'import json; print(json.load(open("runs/feasibility/final.json"))["selected_steps_per_credit"])')"
 uv run latesignal selection run configs/experiments/final.yaml \
   --data-manifest data/processed/manifests/preparation.json \
   --feature-config configs/features.yaml \
   --cache-root data/runtime-features \
   --out runs/selection \
-  --steps-per-credit SELECTED_STEPS \
-  --device-uuid GPU_UUID \
+  --steps-per-credit "$SELECTED_STEPS" \
+  --device-uuid "$GPU_UUID" \
   --json
 ```
 
@@ -116,7 +140,8 @@ uv run latesignal protocol lock configs/experiments/final.yaml \
 Do not use `--allow-dirty` for a publication run.
 Do not inspect a final-period metric before the lock exists.
 
-Replace `SELECTED_STEPS` and `GPU_UUID` with the exact feasibility result and stable NVIDIA device UUID used throughout the run.
+Keep `GPU_UUID` and `CUDA_VISIBLE_DEVICES` exported in this same shell for selection, locking, qualification, final execution, and aggregation.
+Binding, selection, locking, qualification, final execution, and aggregation fail closed if the export is absent, names a different UUID, or exposes more than one device.
 Qualify checkpoint resume before final scoring:
 
 ```bash
@@ -126,7 +151,7 @@ uv run latesignal final qualify configs/experiments/final.yaml \
   --feature-config configs/features.yaml \
   --cache-root data/runtime-features \
   --out runs/quality-gate.json \
-  --device-uuid GPU_UUID \
+  --device-uuid "$GPU_UUID" \
   --json
 ```
 
@@ -139,7 +164,7 @@ uv run latesignal final run configs/experiments/final.yaml \
   --feature-config configs/features.yaml \
   --cache-root data/runtime-features \
   --out runs/final \
-  --device-uuid GPU_UUID \
+  --device-uuid "$GPU_UUID" \
   --json
 
 uv run latesignal final aggregate configs/experiments/final.yaml \
@@ -149,7 +174,7 @@ uv run latesignal final aggregate configs/experiments/final.yaml \
   --cache-root data/runtime-features \
   --out runs/final \
   --quality-gate runs/quality-gate.json \
-  --device-uuid GPU_UUID \
+  --device-uuid "$GPU_UUID" \
   --json
 ```
 

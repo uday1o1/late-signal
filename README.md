@@ -148,12 +148,26 @@ make check
 After accepting the dataset terms and preparing the licensed data, run the strict machine-bound feasibility gate:
 
 ```console
+GPU_UUID="$(nvidia-smi --query-gpu=uuid --format=csv,noheader | sed '/^[[:space:]]*$/d')"
+test "$(printf '%s\n' "$GPU_UUID" | wc -l | tr -d ' ')" = "1"
+test "${GPU_UUID#GPU-}" != "$GPU_UUID"
+export GPU_UUID
+export CUDA_VISIBLE_DEVICES="$GPU_UUID"
+
 uv run latesignal protocol validate configs/experiments/final.yaml \
+  --out runs/feasibility/measured.json \
+  --json
+uv run latesignal protocol bind-feasibility configs/experiments/final.yaml \
+  --measured runs/feasibility/measured.json \
+  --data-manifest data/processed/manifests/preparation.json \
+  --device-uuid "$GPU_UUID" \
   --out runs/feasibility/final.json \
   --json
 ```
 
 Selection must not start unless validation passes every authored cap and selects the largest eligible training budget without consulting a quality metric.
+The measurement records the exported physical GPU UUID.
+The binding command fails unless exactly that UUID remains exported and seals the passing measurement to the current clean source, dependency lock, final configuration, prepared-data inventory, runtime, and GPU identity.
 The public CLI then runs selection, freezes the protocol, qualifies CUDA checkpoint resume, executes the final matrix, and aggregates the report.
 Every stage writes immutable resumable evidence under ignored run directories and refuses mismatched code, environment, data, or GPU identities.
 See [Reproducibility](docs/reproducibility.md) for the complete resource-neutral command sequence and recovery rules.

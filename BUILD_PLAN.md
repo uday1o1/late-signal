@@ -42,13 +42,15 @@ No remote-shell orchestration or hosted automation is required.
 
 1. Update `main`, install the frozen environment, and prove the local software state with `make check`.
 2. Review the dataset terms, fetch with explicit license acceptance, inspect, and prepare the data on permitted storage, or mount an already verified prepared store.
-3. Run `uv run latesignal protocol validate configs/experiments/final.yaml --out runs/feasibility/final.json --json` on the selected CUDA environment.
-4. Stop if the result has any blocker or does not select a steps-per-credit value.
-5. Run the documented selection command with that exact selected budget and retain all 36 + 8 + 6 candidate outcomes.
-6. Create the protocol lock before inspecting any final-period metric.
-7. Run CUDA checkpoint-resume qualification, execute or resume all 39 final runs, and aggregate only after every required run is complete.
-8. Render and inspect the aggregate report, run the publication audit, and perform the documented clean-checkout reproduction before accepting M8.
-9. Run `make check` again, commit the reviewed aggregate evidence directly on `main`, push `main`, and verify that the remote `main` revision equals the local commit.
+3. Discover exactly one stable GPU UUID, reject an empty or multi-device result, and export that UUID through `CUDA_VISIBLE_DEVICES` in the shell that runs every later command.
+4. Run `uv run latesignal protocol validate configs/experiments/final.yaml --out runs/feasibility/measured.json --json` on that selected CUDA device.
+5. Stop if the measured result has any blocker or does not select a steps-per-credit value.
+6. Run `latesignal protocol bind-feasibility` to seal the passing measurement to the exact clean commit, dependency lock, final configuration, prepared-data inventory, runtime, and exported GPU UUID as `runs/feasibility/final.json`.
+7. Run the documented selection command with that exact selected budget and retain all 36 + 8 + 6 candidate outcomes.
+8. Create the protocol lock before inspecting any final-period metric.
+9. Run CUDA checkpoint-resume qualification, execute or resume all 39 final runs, and aggregate only after every required run is complete.
+10. Render and inspect the aggregate report, run the publication audit, and perform the documented clean-checkout reproduction before accepting M8.
+11. Run `make check` again, commit the reviewed aggregate evidence directly on `main`, push `main`, and verify that the remote `main` revision equals the local commit.
 
 The exact public commands, required inputs, recovery behavior, and identity checks are documented in [Reproducibility](docs/reproducibility.md).
 Raw data, prepared rows, license acknowledgements, checkpoints, ordinary runs, and machine-specific artifacts remain ignored and are not available from a clone.
@@ -658,6 +660,7 @@ latesignal data inspect
 latesignal data prepare
 latesignal protocol validate CONFIG
 latesignal protocol estimate CONFIG
+latesignal protocol bind-feasibility CONFIG --measured FILE --data-manifest FILE --device-uuid UUID --out FILE
 latesignal run CONFIG --out DIR
 latesignal resume CHECKPOINT --out DIR
 latesignal evaluate RUN_DIR

@@ -21,9 +21,10 @@ from latesignal.data.download import FetchNotice, fetch_dataset
 from latesignal.data.inspect import inspect_locked_archive
 from latesignal.data.manifests import read_json, write_json_atomic
 from latesignal.data.prepare import prepare_data
-from latesignal.errors import ConfigurationError, ExitCode, LateSignalError
+from latesignal.errors import ConfigurationError, ConsistencyError, ExitCode, LateSignalError
 from latesignal.evaluation.runner import compare_run_dirs, evaluate_run_dir
 from latesignal.experiments.estimate import estimate_protocol
+from latesignal.experiments.feasibility_context import bind_feasibility_context
 from latesignal.experiments.production_aggregate_runner import run_production_aggregate
 from latesignal.experiments.production_final_runner import run_production_final
 from latesignal.experiments.production_qualification_runner import run_final_qualification
@@ -45,7 +46,7 @@ app = typer.Typer(
 )
 data_app = typer.Typer(help="Acquire and audit the licensed source dataset.", no_args_is_help=True)
 protocol_app = typer.Typer(
-    help="Validate and estimate authored experiment matrices.", no_args_is_help=True
+    help="Measure, bind, and lock authored experiment matrices.", no_args_is_help=True
 )
 selection_app = typer.Typer(
     help="Run the frozen chronological selection study.", no_args_is_help=True
@@ -158,7 +159,7 @@ def final_run_command(
         typer.Option(
             "--device-uuid",
             min=1,
-            help="Stable UUID of the sole CUDA device selected by the launcher.",
+            help="Stable GPU UUID also exported through CUDA_VISIBLE_DEVICES.",
         ),
     ],
     json_output: JsonOption = False,
@@ -280,7 +281,7 @@ def final_aggregate_command(
         typer.Option(
             "--device-uuid",
             min=1,
-            help="Stable UUID of the sole CUDA device selected by the launcher.",
+            help="Stable GPU UUID also exported through CUDA_VISIBLE_DEVICES.",
         ),
     ],
     json_output: JsonOption = False,
@@ -387,7 +388,7 @@ def final_qualify_command(
         typer.Option(
             "--device-uuid",
             min=1,
-            help="Stable UUID of the sole CUDA device selected by the launcher.",
+            help="Stable GPU UUID also exported through CUDA_VISIBLE_DEVICES.",
         ),
     ],
     json_output: JsonOption = False,
@@ -488,7 +489,7 @@ def selection_run_command(
         typer.Option(
             "--device-uuid",
             min=1,
-            help="Stable UUID of the CUDA device selected by the launcher.",
+            help="Stable GPU UUID also exported through CUDA_VISIBLE_DEVICES.",
         ),
     ],
     json_output: JsonOption = False,
@@ -533,20 +534,25 @@ def audit_command(json_output: JsonOption = False) -> None:
         raise typer.Exit(code=int(ExitCode.CONSISTENCY_FAILURE))
 
 
-def _protocol_result(config: Path, out: Path | None = None) -> dict[str, Any]:
-    final, protocol, protocol_sha256 = load_final_protocol(config)
-    repository = Path.cwd().resolve()
-    benchmark_parent = out.parent.resolve() if out is not None else repository / "runs/feasibility"
+def _feasibility_output_parent(output: Path | None, repository: Path) -> Path:
+    parent = output.parent.resolve() if output is not None else repository / "runs/feasibility"
     try:
-        in_repository = benchmark_parent.relative_to(repository)
+        in_repository = parent.relative_to(repository)
     except ValueError:
         pass
     else:
         if not in_repository.parts or in_repository.parts[0] != "runs":
             raise ConfigurationError(
                 "Feasibility output inside the repository must be under the ignored runs root",
-                details={"output_parent": str(benchmark_parent)},
+                details={"output_parent": str(parent)},
             )
+    return parent
+
+
+def _protocol_result(config: Path, out: Path | None = None) -> dict[str, Any]:
+    final, protocol, protocol_sha256 = load_final_protocol(config)
+    repository = Path.cwd().resolve()
+    benchmark_parent = _feasibility_output_parent(out, repository)
     return estimate_protocol(
         final,
         protocol,
@@ -623,6 +629,101 @@ def protocol_validate(
     """Require the matrix, pilot, accelerator, and authored caps to pass."""
 
     protocol_estimate(config, out, json_output)
+
+
+@protocol_app.command("bind-feasibility")
+def protocol_bind_feasibility(
+    config: Annotated[
+        Path,
+        typer.Argument(
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+            help="Authored final experiment configuration used for measurement.",
+        ),
+    ],
+    measured: Annotated[
+        Path,
+        typer.Option(
+            "--measured",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+            help="Passing unbound result from protocol validate.",
+        ),
+    ],
+    data_manifest: Annotated[
+        Path,
+        typer.Option(
+            "--data-manifest",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+            help="Prepared-data manifest and inventory used by the measurement.",
+        ),
+    ],
+    device_uuid: Annotated[
+        str,
+        typer.Option(
+            "--device-uuid",
+            min=1,
+            help="Stable GPU UUID also exported through CUDA_VISIBLE_DEVICES.",
+        ),
+    ],
+    out: Annotated[
+        Path,
+        typer.Option(
+            "--out",
+            file_okay=True,
+            dir_okay=False,
+            resolve_path=True,
+            help="New immutable context-bound feasibility destination.",
+        ),
+    ],
+    json_output: JsonOption = False,
+) -> None:
+    """Seal passing feasibility to the exact clean data, code, runtime, and GPU."""
+
+    try:
+        final, _, protocol_sha256 = load_final_protocol(config)
+        measured_value = read_json(measured)
+        if (
+            final.target_device != "cuda"
+            or measured_value.get("feasibility_model_version") != 3
+            or measured_value.get("status") != "passed"
+            or measured_value.get("blockers") != []
+            or measured_value.get("protocol_sha256") != protocol_sha256
+        ):
+            raise ConsistencyError(
+                "Only passing matched CUDA feasibility can be bound for publication"
+            )
+        _feasibility_output_parent(out, Path.cwd().resolve())
+        bound = bind_feasibility_context(
+            measured,
+            out,
+            repository=Path.cwd(),
+            data_manifest_path=data_manifest,
+            final_config_path=config,
+            device_uuid=device_uuid,
+        )
+    except LateSignalError as error:
+        _fail(error, json_output)
+    _emit(
+        {
+            "ok": True,
+            "status": bound["status"],
+            "out": str(out),
+            "selected_steps_per_credit": bound["selected_steps_per_credit"],
+            "context_sha256": bound["execution_context"]["context_sha256"],
+        },
+        json_output,
+    )
 
 
 @protocol_app.command("lock")

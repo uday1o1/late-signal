@@ -19,6 +19,17 @@ def test_selected_cuda_device_requires_the_exact_stable_uuid(
         require_selected_cuda_device("GPU-other")
 
 
+def test_selected_cuda_device_requires_explicit_visibility_export(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    monkeypatch.setattr("torch.cuda.is_available", lambda: True)
+    monkeypatch.setattr("torch.cuda.device_count", lambda: 1)
+
+    with pytest.raises(ConsistencyError, match="exactly one CUDA device"):
+        require_selected_cuda_device("GPU-exact")
+
+
 @pytest.mark.parametrize(
     ("available", "count"),
     [(False, 0), (True, 0), (True, 2)],

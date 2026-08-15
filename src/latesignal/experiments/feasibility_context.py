@@ -15,6 +15,7 @@ from latesignal.data.manifests import (
 )
 from latesignal.data.prepared import verify_prepared_inventory
 from latesignal.errors import ConsistencyError
+from latesignal.experiments.cuda_device import require_selected_cuda_device
 from latesignal.training.reproducibility import capture_runtime_identity
 
 
@@ -24,6 +25,7 @@ def _current_context(
     final_config_path: Path,
     device_uuid: str,
 ) -> dict[str, object]:
+    require_selected_cuda_device(device_uuid)
     runtime = capture_runtime_identity(repository)
     if runtime.get("git_dirty") is not False or runtime.get("git_commit") is None:
         raise ConsistencyError("Feasibility context requires a clean Git runtime")
@@ -72,6 +74,15 @@ def bind_feasibility_context(
     measured = read_json(measured_path)
     if measured.get("execution_context") is not None:
         raise ConsistencyError("Measured feasibility already has an execution context")
+    benchmark = measured.get("benchmark")
+    measured_environment = benchmark.get("environment") if isinstance(benchmark, dict) else None
+    if (
+        not isinstance(measured_environment, dict)
+        or measured_environment.get("device_uuid") != device_uuid
+    ):
+        raise ConsistencyError(
+            "Measured feasibility was not produced on the selected exported GPU UUID"
+        )
     context = _current_context(
         repository,
         data_manifest_path,
@@ -85,17 +96,16 @@ def bind_feasibility_context(
     return payload
 
 
-def verify_feasibility_context(
-    path: Path,
+def verify_feasibility_context_payload(
+    value: dict[str, Any],
     *,
     repository: Path,
     data_manifest_path: Path,
     final_config_path: Path,
     device_uuid: str,
 ) -> dict[str, Any]:
-    """Require reusable feasibility evidence to match the current exact runtime."""
+    """Require one feasibility payload to match the current exact runtime."""
 
-    value = read_json(path)
     stored = value.get("execution_context")
     if not isinstance(stored, dict):
         raise ConsistencyError("Stored feasibility has no execution context")
@@ -124,3 +134,22 @@ def verify_feasibility_context(
     ):
         raise ConsistencyError("Stored feasibility payload failed its content seal")
     return value
+
+
+def verify_feasibility_context(
+    path: Path,
+    *,
+    repository: Path,
+    data_manifest_path: Path,
+    final_config_path: Path,
+    device_uuid: str,
+) -> dict[str, Any]:
+    """Require reusable feasibility evidence to match the current exact runtime."""
+
+    return verify_feasibility_context_payload(
+        read_json(path),
+        repository=repository,
+        data_manifest_path=data_manifest_path,
+        final_config_path=final_config_path,
+        device_uuid=device_uuid,
+    )
