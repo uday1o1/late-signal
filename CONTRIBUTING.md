@@ -2,7 +2,7 @@
 
 LateSignal is an event-time delayed-feedback benchmark with strict temporal and licensing boundaries.
 
-Before submitting a change, run `make check` and the closest public CLI workflow affected by the change.
+Before committing and pushing a change, run `make check` and the closest public CLI workflow affected by the change.
 Tests must preserve prediction-before-reveal ordering, legal label availability, monitoring exclusion, deterministic ledgers, and equal-compute accounting.
 Do not weaken a protocol gate to accommodate an implementation or infrastructure failure.
 

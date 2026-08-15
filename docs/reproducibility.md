@@ -21,8 +21,22 @@ uv run latesignal reproduce results/published/synthetic-reproduction.json \
   --out runs/reproduced
 ```
 
-Hosted CI performs the same formatting, lint, typing, and test checks without downloading the licensed dataset or requiring a GPU.
+`make check` is the required local software gate and does not download the licensed dataset or require a GPU.
 The checked-in synthetic manifest binds the source tree, dependency lock, configuration, five public ledgers, execution counts, and final metrics.
+
+## Optional bounded CUDA qualification
+
+On a compatible local CUDA machine, exercise the accelerator path without licensed data:
+
+```bash
+uv run latesignal protocol validate configs/experiments/gpu_smoke.yaml \
+  --out runs/feasibility/gpu-smoke.json \
+  --json
+uv run pytest tests/unit/test_shared_training.py tests/unit/test_methods.py
+```
+
+This is a software qualification only.
+It does not include the required real-data pilot, does not use the final resource caps, and cannot accept Milestone 7.
 
 ## Licensed data workflow
 

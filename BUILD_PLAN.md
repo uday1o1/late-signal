@@ -8,40 +8,53 @@ The repository began empty, and the implemented paths now follow the authority d
 The agent should implement milestones in order and should not change the final evaluation protocol after viewing final-period results.
 Every reported improvement must be supported by the locked protocol, paired uncertainty estimates, and equal-budget accounting described here.
 
-### 1.1 Current implementation status
+### 1.1 Current implementation and acceptance state
 
-This section records completed gates and remaining work without weakening any milestone acceptance criterion.
+This table records the current project checkpoint without weakening any milestone gate.
 
-Milestones 0 through 6 are implemented and locally verified.
-They include the licensed-data boundary, inspected and prepared data pipeline, event-time simulator, shared model and offline references, delayed-label methods, credit schedulers, sealed evaluation, paired uncertainty, compute accounting, and aggregate report generation.
+| Milestone | State | Evidence and remaining gate |
+| --- | --- | --- |
+| M0 - Licensing and data audit | Implemented and locally validated | The official artifact was reviewed, 15,995,634 rows were parsed, 15,924,859 were accepted, 70,775 were quarantined, and the reconciliation and unique timestamp-unit gates passed. The row-level manifests and data remain ignored and must be rebuilt or mounted on a new machine. |
+| M1 - Synthetic event-time vertical slice | Implemented and locally validated | The public CPU path, prediction-before-reveal ordering, legal availability checks, checkpointing, resume, and exact synthetic reproduction are implemented and tested. |
+| M2 - Real-data preparation and feature isolation | Implemented and locally validated | The official corpus was prepared into 15,924,859 feature rows and 15,924,859 truth rows across 7,639 inventoried files. The feature allowlist, separate truth roots, bounded preparation, and past-only history checks passed. |
+| M3 - Shared model and offline sanity references | Implemented and locally validated | The shared learner, deterministic sampling, budget accounting, logistic reference, LightGBM reference, calibration, and their tests are implemented. |
+| M4 - Delayed-label method suite | Implemented and locally validated | Complete wait, immediate fake negative, fixed wait, DFM, FNW, ES-DFM, and the separate oracle reference are implemented with equation and event-sequence tests. |
+| M5 - Credit schedulers | Implemented and locally validated | Fixed early, midpoint, deadline, and calibration-drift scheduling are implemented with matched-credit, monitoring-exclusion, trigger, and audit-ledger tests. |
+| M6 - Locked evaluation and uncertainty | Implemented and locally validated | Final-period sealing, paired block bootstrap, slices, calibration, compute accounting, feasibility expansion, and aggregate-only reporting are implemented and locally tested. Target-bound cap acceptance remains part of M7. |
+| M7 - Protocol freeze and final run | Implemented pending target qualification | The 36 + 8 + 6 selection graph, protocol lock, CUDA resume qualification, 39-run final matrix, final aggregation, and collection manifest exist. No feasibility result bound to the current commit and final configuration has passed, so selection, locking, and final-period scoring have not started. |
+| M8 - Portfolio publication | Deferred behind M7 | Only synthetic reproduction evidence is published. A truthful real-data result table, scheduler conclusion, final limitations review, clean-checkout reproduction, and publication audit require accepted M7 aggregate evidence. |
 
-Milestone 7 has complete software paths for the 50-candidate selection graph, immutable pre-scoring protocol lock, CUDA checkpoint-resume qualification, 39-run final matrix, final aggregation, and aggregate-only collection manifest.
-Milestone 7 is not complete because the licensed real-data experiment has not passed on a qualified CUDA environment under the current final configuration.
-No final-period result has been scored or published.
+No final-period metric has been scored or published.
+The repository must not claim a completed real-data study or a supported scheduler result until M7 and M8 pass.
 
 The checked-in resource authorization is 89 runs, 25 GPU-hours, 26 GiB working disk, and 2 GiB retained aggregate evidence.
-These values remain hard ceilings rather than a claim that an arbitrary accelerator will finish the matrix.
-Every new execution environment must produce fresh feasibility evidence bound to its exact commit, dependency lock, prepared-data manifest, runtime, and GPU identity.
+These values are hard ceilings, not a prediction that every accelerator will finish the matrix.
+Every execution environment must produce fresh feasibility evidence bound to the exact commit, dependency lock, prepared-data manifest, runtime, and GPU identity.
 Selection must not start unless feasibility model version 3 reports no blockers, enumerates 89 runs, passes every cap check, and selects the largest eligible steps-per-credit candidate.
 
-A fresh clone can continue with this resource-neutral sequence:
+Older ignored feasibility files show that the bounded benchmark and two-day real-data pilot executed on a CUDA workstation, but those files are blocked and bound to earlier protocol and source identities.
+They are diagnostic history only and cannot accept M7.
 
-1. Install the locked environment with `uv sync --frozen --all-groups` and run `make check`.
-2. Review the dataset terms, fetch with explicit license acceptance, inspect, and prepare the data on permitted storage.
+### 1.2 Exact continuation path
+
+Continue from one clean clone on any compatible Linux CUDA machine with at least 8 GiB of GPU memory, approximately 16 GiB of host memory, permitted access to the licensed dataset, and enough local storage for the authored cap.
+No remote-shell orchestration or hosted automation is required.
+
+1. Update `main`, install the frozen environment, and prove the local software state with `make check`.
+2. Review the dataset terms, fetch with explicit license acceptance, inspect, and prepare the data on permitted storage, or mount an already verified prepared store.
 3. Run `uv run latesignal protocol validate configs/experiments/final.yaml --out runs/feasibility/final.json --json` on the selected CUDA environment.
-4. Run the documented selection command with the feasibility-selected budget and retain its complete 36 + 8 + 6 candidate evidence.
-5. Create the protocol lock before any final-period scoring, run CUDA qualification, execute the 39-run final matrix, and aggregate the report through the public CLI.
-6. Verify the aggregate-only collection manifest and repository publication audit before committing any measured result.
+4. Stop if the result has any blocker or does not select a steps-per-credit value.
+5. Run the documented selection command with that exact selected budget and retain all 36 + 8 + 6 candidate outcomes.
+6. Create the protocol lock before inspecting any final-period metric.
+7. Run CUDA checkpoint-resume qualification, execute or resume all 39 final runs, and aggregate only after every required run is complete.
+8. Render and inspect the aggregate report, run the publication audit, and perform the documented clean-checkout reproduction before accepting M8.
+9. Run `make check` again, commit the reviewed aggregate evidence directly on `main`, push `main`, and verify that the remote `main` revision equals the local commit.
 
-The exact public commands and identity checks are documented in [Reproducibility](docs/reproducibility.md).
+The exact public commands, required inputs, recovery behavior, and identity checks are documented in [Reproducibility](docs/reproducibility.md).
 Raw data, prepared rows, license acknowledgements, checkpoints, ordinary runs, and machine-specific artifacts remain ignored and are not available from a clone.
 
-Milestone 8 is not complete.
-It requires the locked aggregate evidence from Milestone 7, truthful measured result tables, the final scheduler outcome, final methodology and limitations review, a clean-checkout reproduction exercise, and the publication audit.
-Until those gates pass, the repository must not claim a real-data result or a completed V1 study.
-
-At this implementation checkpoint, `UV_CACHE_DIR=/private/tmp/uv-cache make check` passes formatting, Ruff lint, mypy across 116 source files, all 231 tests, and the repository audit with zero findings.
-The checked-in synthetic reproduction manifest was regenerated through the public experiment path and reproduces its exact ledgers, counts, and metrics.
+The intentional operational rescoping does not change the scientific thesis or any acceptance gate.
+Repository-specific remote-shell helpers and hosted automation were removed in favor of the public CLI, local verification, and a platform-neutral CUDA handoff.
 
 ## 2. Product definition
 
@@ -800,10 +813,6 @@ late-signal/
   results/
     README.md
     published/
-  .github/workflows/
-    ci.yml
-    gpu-smoke.yml
-    final-reproduction.yml
 ```
 
 Raw data, prepared rows, checkpoints, ordinary runs, model weights trained on restricted data, and large figures are ignored by Git.
@@ -1013,16 +1022,29 @@ Fixed-wait, DFM, ES-DFM, the two additional fixed scheduler timings, offline mod
 The core report must identify deferred extended components and cannot imply they ran.
 This cut preserves the central ML contribution if the full literature-transfer matrix exceeds the authored feasibility caps.
 
-## 27. CI design
+## 27. Local verification and repository preservation
 
-Hosted CPU CI runs Ruff format and lint, mypy, pytest, Hypothesis profiles, schema validation, synthetic end-to-end tests, report generation, license-flow tests using a fake archive, and Git-ignore guards.
-CI must not download the Criteo archive.
-CI must not require a GPU.
+`make check` is the required local software gate.
+It runs Ruff formatting and lint, strict mypy, the complete pytest suite including Hypothesis coverage, and the repository publication audit.
+It must not download the Criteo archive or require a GPU.
 
-A trusted self-hosted GPU workflow runs a bounded synthetic smoke and optionally a user-provisioned real-data experiment.
-Public fork pull requests must never run code on the self-hosted GPU runner.
-The workflow must use a hardware-specific concurrency group and clean only its exact run directory.
-Final experiments should be manual, preserve manifests and aggregate outputs, and not upload restricted raw data or checkpoints by default.
+Run the nearest public CLI workflow affected by a change in addition to `make check`.
+Use `configs/experiments/gpu_smoke.yaml` for a bounded local CUDA-path qualification when a compatible device is available.
+Use `configs/experiments/final.yaml` only for the licensed final workflow and preserve its complete manifests and aggregate outputs.
+Restricted raw data, prepared rows, row-level predictions, and checkpoints must not be added to the repository.
+
+Preserve a verified checkpoint directly on `main`:
+
+```bash
+git status --short
+git add PATHS...
+git commit -m "TYPE: concise description"
+git push origin main
+git rev-parse HEAD
+git ls-remote --exit-code origin refs/heads/main
+```
+
+The local and remote commit identifiers must match, and `git status --short` must be empty before handoff.
 
 ## 28. Reporting deliverables
 

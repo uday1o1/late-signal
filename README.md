@@ -181,5 +181,6 @@ The output contains `report.html`, aggregate CSV tables, and a content-hashed ma
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the local verification workflow and contribution rules.
-Hosted CI is CPU-only and never downloads the licensed dataset.
-A manual trusted-runner workflow provides the bounded CUDA qualification path.
+Run `make check` locally before preserving a change.
+The check does not download the licensed dataset or require a GPU.
+When a compatible CUDA device is available, use `configs/experiments/gpu_smoke.yaml` for the bounded local qualification path.
